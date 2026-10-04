@@ -125,3 +125,34 @@ func TestBadRequests(t *testing.T) {
 		})
 	}
 }
+
+func TestUnmatchedRoutesReturnJSON(t *testing.T) {
+	srv := newServer(t)
+	cases := []struct {
+		name, method, path string
+		want               int
+		allow              bool
+	}{
+		{"unknown path", "GET", "/nope", http.StatusNotFound, false},
+		{"trailing slash", "GET", "/todos/", http.StatusNotFound, false},
+		{"wrong method", "PUT", "/todos", http.StatusMethodNotAllowed, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, body := do(t, srv, tc.method, tc.path, "")
+			if resp.StatusCode != tc.want {
+				t.Fatalf("got %d %s; want %d", resp.StatusCode, body, tc.want)
+			}
+			if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+				t.Fatalf("Content-Type = %q", ct)
+			}
+			var e errorBody
+			if err := json.Unmarshal(body, &e); err != nil || e.Error == "" {
+				t.Fatalf("body %q is not an error object", body)
+			}
+			if tc.allow && resp.Header.Get("Allow") == "" {
+				t.Fatal("missing Allow header")
+			}
+		})
+	}
+}
