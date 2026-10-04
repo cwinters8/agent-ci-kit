@@ -89,11 +89,14 @@ that reaches the shipped image or the CI that builds it.
 | `Dockerfile`, `.dockerignore` | supply-chain, release |
 | `.github/workflows/**`, `vps/**` | supply-chain, secrets |
 | `.claude/**` | supply-chain |
+| `setup/**` | supply-chain, secrets |
 | `go.mod`, `go.sum` | supply-chain, release |
 | `.env*`, anything adding an env read | secrets |
 
 `.claude/**` is in scope because the agent's own settings, hooks and skills
 decide what it is allowed to run in CI with your secrets present.
+`setup/**` is in scope because buyers run it on their own machines, with
+their `gh` credentials, against their own repos.
 
 ## Stack
 
