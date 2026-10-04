@@ -90,6 +90,18 @@ func TestCreateGetListUpdateDelete(t *testing.T) {
 	}
 }
 
+func TestPatchTitle(t *testing.T) {
+	srv := newServer(t)
+	do(t, srv, "POST", "/todos", `{"title":"old"}`)
+
+	resp, body := do(t, srv, "PATCH", "/todos/1", `{"title":"new"}`)
+	var updated store.Todo
+	json.Unmarshal(body, &updated)
+	if resp.StatusCode != http.StatusOK || updated.Title != "new" || updated.Done {
+		t.Fatalf("patch title: %d %s", resp.StatusCode, body)
+	}
+}
+
 func TestEmptyListIsArrayNotNull(t *testing.T) {
 	srv := newServer(t)
 	_, body := do(t, srv, "GET", "/todos", "")
@@ -107,6 +119,10 @@ func TestBadRequests(t *testing.T) {
 		{"malformed JSON", "POST", "/todos", `{"title":`, http.StatusBadRequest},
 		{"trailing garbage", "POST", "/todos", `{"title":"a"} garbage`, http.StatusBadRequest},
 		{"two objects", "POST", "/todos", `{"title":"a"}{"title":"b"}`, http.StatusBadRequest},
+		{"patch trailing garbage", "PATCH", "/todos/1", `{"done":true} garbage`, http.StatusBadRequest},
+		{"patch blank title", "PATCH", "/todos/1", `{"title":"  "}`, http.StatusUnprocessableEntity},
+		{"patch missing id", "PATCH", "/todos/42", `{"done":true}`, http.StatusNotFound},
+		{"patch non-numeric id", "PATCH", "/todos/abc", `{"done":true}`, http.StatusBadRequest},
 		{"unknown field", "POST", "/todos", `{"title":"x","owner":"me"}`, http.StatusBadRequest},
 		{"blank title", "POST", "/todos", `{"title":"  "}`, http.StatusUnprocessableEntity},
 		{"non-numeric id", "GET", "/todos/abc", "", http.StatusBadRequest},
