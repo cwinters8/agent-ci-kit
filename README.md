@@ -43,11 +43,14 @@ The sample app (replace with yours)
 2. Install the Claude GitHub App: https://github.com/apps/claude
 3. Add repo secrets:
    - `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token`; uses your Pro/Max plan) **or** `ANTHROPIC_API_KEY` (API billing)
-   - `AGENT_PR_TOKEN`: a fine-grained personal access token on your own account
-     (GitHub has no repo-owned tokens), limited to this repo only. Permissions:
-     Contents and Pull requests read/write; add Issues read/write and Actions
-     read-only if you use the daily review sweep. Without it, CI does not run on
-     agent PRs.
+   - `AGENT_PR_TOKEN` (required): a fine-grained personal access token on your
+     own account (GitHub has no repo-owned tokens), limited to this repo only.
+     Permissions: Contents and Pull requests read/write; add Issues read/write
+     and Actions read-only if you use the daily review sweep. The workflow opens
+     agent PRs with it. The built-in `GITHUB_TOKEN` can't stand in: GitHub
+     blocks Actions from creating PRs by default, and PRs it does open trigger
+     no CI. If the PR step fails anyway, the workflow comments a link on the
+     issue so you can open the PR by hand.
 4. Create labels: `agent:fix`, `agent:fix-opus`, `agent:needs-human`, `agent:large-diff`.
 5. Protect `main`: require a pull request, but **not** an approving review.
    Agent PRs are opened with your PAT, so GitHub lists you as the author, and
