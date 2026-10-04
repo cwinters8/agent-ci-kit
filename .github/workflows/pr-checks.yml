@@ -1,0 +1,37 @@
+# The mechanical checks, on every PR that changes Go code. Agents run the same
+# `make check` before they push (see .claude/project-profile.md -> Mechanical
+# checks), so a red run here means the agent skipped a step, not that CI knows
+# something the agent didn't.
+#
+# Docs- and config-only PRs skip this job entirely (the `paths:` filter), which
+# matters when agents open PRs all day. If you make this a required status
+# check, use a ruleset that allows skipped checks, or drop the filter.
+
+name: PR checks
+
+on:
+  pull_request:
+    paths:
+      - '**.go'
+      - go.mod
+      - go.sum
+      - Makefile
+      - .github/workflows/pr-checks.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: make check

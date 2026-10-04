@@ -1,0 +1,253 @@
+# Issue -> branch -> draft PR, unattended.
+#
+# Label an issue `agent:fix` and Claude Code picks it up headless on a GitHub
+# runner: reads AGENTS.md, reproduces, makes the smallest fix, runs the
+# project's mechanical checks, and pushes a `claude/issue-<n>-...` branch. This
+# workflow (not the model) then opens the draft PR, so the guardrails below are
+# enforced by YAML you can read rather than by a prompt the model may ignore.
+#
+# Label `agent:fix-opus` instead to route a hard issue to Opus. Everything else
+# runs on Sonnet. See docs/COST-CONTROLS.md for why that is the default.
+#
+# Setup (once):
+#   1. Install the Claude GitHub App on the repo (https://github.com/apps/claude).
+#   2. Add ONE of these repo secrets:
+#        CLAUDE_CODE_OAUTH_TOKEN  Pro/Max subscription (`claude setup-token`), or
+#        ANTHROPIC_API_KEY        pay-per-token API billing.
+#      And, strongly recommended:
+#        AGENT_PR_TOKEN  fine-grained PAT (this repo only; Contents + Pull
+#                        requests read/write). A PR opened with the default
+#                        GITHUB_TOKEN does not trigger your other workflows, so
+#                        without this your CI never runs on agent PRs. The Claude
+#                        App token cannot be used here: the action revokes it
+#                        when its step ends.
+#   3. Optional repo variables (Settings -> Variables), defaults in brackets:
+#        AGENT_DAILY_RUN_CAP [10]   max agent runs per UTC day
+#        AGENT_MAX_TURNS_SONNET [30], AGENT_MAX_TURNS_OPUS [40]
+#        AGENT_MAX_DIFF_LINES [400] larger diffs get the `agent:large-diff` label
+#   4. Create the labels: agent:fix, agent:fix-opus, agent:needs-human,
+#      agent:large-diff.
+#
+# Only someone with write access can apply a label, and the action re-checks
+# that the labeler is a human with write access, so a stranger cannot spend
+# your credits by opening an issue.
+
+name: Claude fix issue
+
+on:
+  issues:
+    types: [labeled]
+
+# One run per issue. Not cancel-in-progress: killing an agent mid-push leaves a
+# half-written branch, and you have already paid for the tokens.
+concurrency:
+  group: claude-fix-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Budget and routing
+    if: github.event.label.name == 'agent:fix' || github.event.label.name == 'agent:fix-opus'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: read
+      issues: write
+    outputs:
+      allowed: ${{ steps.budget.outputs.allowed }}
+      model: ${{ steps.route.outputs.model }}
+      max_turns: ${{ steps.route.outputs.max_turns }}
+    steps:
+      - name: Route model
+        id: route
+        env:
+          LABEL: ${{ github.event.label.name }}
+          TURNS_SONNET: ${{ vars.AGENT_MAX_TURNS_SONNET || '30' }}
+          TURNS_OPUS: ${{ vars.AGENT_MAX_TURNS_OPUS || '40' }}
+        run: |
+          # Aliases, not dated model IDs: `sonnet` and `opus` always resolve to
+          # the current model in Claude Code, so this file never goes stale.
+          if [ "$LABEL" = "agent:fix-opus" ]; then
+            echo "model=opus" >> "$GITHUB_OUTPUT"
+            echo "max_turns=$TURNS_OPUS" >> "$GITHUB_OUTPUT"
+          else
+            echo "model=sonnet" >> "$GITHUB_OUTPUT"
+            echo "max_turns=$TURNS_SONNET" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A hard daily ceiling on agent runs. The per-run ceilings (max turns,
+      # timeout) bound one bad run; this bounds a bad day, e.g. someone bulk-
+      # labeling 40 issues.
+      - name: Check daily run cap
+        id: budget
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAP: ${{ vars.AGENT_DAILY_RUN_CAP || '10' }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          # Every `labeled` event starts a run of this workflow, including labels
+          # that are not ours; those runs skip every job and conclude "skipped",
+          # so they are excluded from the count.
+          today="$(date -u +%Y-%m-%d)"
+          used="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/claude-fix-issue.yml/runs?created=>=$today&per_page=100" \
+            --jq '[.workflow_runs[] | select(.id != '"$GITHUB_RUN_ID"' and .conclusion != "skipped")] | length')"
+          echo "Agent runs today: $used / $CAP"
+          if [ "$used" -ge "$CAP" ]; then
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" \
+              --body "Daily agent run cap reached ($used/$CAP). Re-apply the label tomorrow, or raise \`AGENT_DAILY_RUN_CAP\`."
+          else
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  fix:
+    name: Claude fixes the issue
+    needs: gate
+    if: needs.gate.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    # Wall-clock ceiling. On API billing this is the hard stop on a runaway
+    # session; on a subscription it stops a stuck run from holding your limit.
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write # lets the action exchange OIDC for the Claude App token
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Your project's toolchain. The agent runs the same checks CI runs, so it
+      # needs the same setup pr-checks.yml has.
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          # Set exactly one of these as a repo secret; the other stays empty.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Forces tag mode: a progress comment on the issue and a fresh
+          # claude/issue-<n>-<timestamp> branch.
+          track_progress: true
+          prompt: |
+            You are fixing issue #${{ github.event.issue.number }} in ${{ github.repository }} with no human available.
+
+            1. Read AGENTS.md and .claude/project-profile.md before touching code.
+            2. Reproduce or locate the bug. If the issue is unclear, is a feature
+               request rather than a bug, or needs a product decision, stop: comment
+               on the issue saying exactly what you need, and make no commits.
+            3. Make the smallest change that fixes the root cause. No refactors, no
+               drive-by cleanups, no dependency changes unless the bug is in one.
+            4. Never edit .github/, .claude/, go.mod/go.sum unless the bug is in a
+               dependency, or any .env file. The workflow refuses to open a PR that
+               does, so doing it wastes the run.
+            5. Run every command under "## Mechanical checks" in
+               .claude/project-profile.md. All must pass before you commit.
+            6. Commit with a message that says what was wrong and why the change fixes
+               it, then push. Do not open a PR yourself; the workflow does that.
+          claude_args: >-
+            --model ${{ needs.gate.outputs.model }}
+            --max-turns ${{ needs.gate.outputs.max_turns }}
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(make check),Bash(make fmt-check),Bash(make vet),Bash(make test),Bash(go test:*),Bash(go vet:*),Bash(go build:*),Bash(gofmt:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*)"
+            --disallowedTools "WebFetch,WebSearch"
+
+      # The model is told not to touch these paths; this is what actually
+      # enforces it. An agent that can edit .github/workflows can grant itself
+      # any permission on its next run.
+      - name: Guardrails
+        id: guard
+        if: steps.claude.outputs.branch_name != ''
+        env:
+          BRANCH: ${{ steps.claude.outputs.branch_name }}
+          BASE: ${{ github.event.repository.default_branch }}
+          MAX_LINES: ${{ vars.AGENT_MAX_DIFF_LINES || '400' }}
+        run: |
+          git fetch origin "$BRANCH" "$BASE" || { echo "pushed=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          if [ "$(git rev-list --count "origin/$BASE..origin/$BRANCH")" = "0" ]; then
+            echo "Agent pushed no commits."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+          protected="$(git diff --name-only "origin/$BASE...origin/$BRANCH" \
+            | grep -E '^(\.github/|\.claude/)|(^|/)\.env' || true)"
+          if [ -n "$protected" ]; then
+            echo "blocked=true" >> "$GITHUB_OUTPUT"
+            { echo 'files<<EOF'; echo "$protected"; echo EOF; } >> "$GITHUB_OUTPUT"
+          else
+            echo "blocked=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          lines="$(git diff --shortstat "origin/$BASE...origin/$BRANCH" \
+            | awk '{print $4 + $6}')"
+          echo "lines=${lines:-0}" >> "$GITHUB_OUTPUT"
+          if [ "${lines:-0}" -gt "$MAX_LINES" ]; then
+            echo "large=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "large=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Refuse protected-path changes
+        if: steps.guard.outputs.blocked == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          BRANCH: ${{ steps.claude.outputs.branch_name }}
+          FILES: ${{ steps.guard.outputs.files }}
+        run: |
+          gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --add-label agent:needs-human
+          printf 'The agent changed protected paths, so no PR was opened. Branch `%s` is left for a human to inspect.\n\n```\n%s\n```\n' \
+            "$BRANCH" "$FILES" | gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file -
+
+      - name: Open draft PR
+        if: steps.guard.outputs.pushed == 'true' && steps.guard.outputs.blocked == 'false'
+        env:
+          # A PAT so the PR triggers CI; falls back to GITHUB_TOKEN, whose PRs
+          # trigger nothing. See setup step 2.
+          GH_TOKEN: ${{ secrets.AGENT_PR_TOKEN || github.token }}
+          BRANCH: ${{ steps.claude.outputs.branch_name }}
+          BASE: ${{ github.event.repository.default_branch }}
+          ISSUE: ${{ github.event.issue.number }}
+          TITLE: ${{ github.event.issue.title }}
+          MODEL: ${{ needs.gate.outputs.model }}
+          LINES: ${{ steps.guard.outputs.lines }}
+          LARGE: ${{ steps.guard.outputs.large }}
+        run: |
+          if [ -n "$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --json number --jq '.[0].number')" ]; then
+            echo "PR already exists for $BRANCH"
+            exit 0
+          fi
+          printf 'Closes #%s\n\nOpened by the `claude-fix-issue` workflow. Model: `%s`. Diff: %s lines.\n\nReview it like any other PR. Comment `@claude` with changes you want.\n' \
+            "$ISSUE" "$MODEL" "$LINES" > "$RUNNER_TEMP/body.md"
+          labels=""
+          [ "$LARGE" = "true" ] && labels="--label agent:large-diff"
+          gh pr create --repo "$GITHUB_REPOSITORY" --draft \
+            --base "$BASE" --head "$BRANCH" \
+            --title "fix: $TITLE" --body-file "$RUNNER_TEMP/body.md" $labels
+
+      # What this run cost, in the job summary. On a subscription the dollar
+      # figure is notional (what the same tokens would cost on the API), which is
+      # still the right number for comparing Sonnet against Opus.
+      - name: Report cost
+        if: always() && steps.claude.outputs.execution_file != ''
+        env:
+          EXEC: ${{ steps.claude.outputs.execution_file }}
+          MODEL: ${{ needs.gate.outputs.model }}
+        run: |
+          [ -f "$EXEC" ] || exit 0
+          jq -r --arg model "$MODEL" '
+            [.[] | select(.type == "result")] | last // {} |
+            "### Agent run\n\n| Model | Turns | Duration | Cost (USD) |\n| --- | --- | --- | --- |\n| \($model) | \(.num_turns // "?") | \((.duration_ms // 0) / 1000 | floor)s | \(.total_cost_usd // "?") |"
+          ' "$EXEC" >> "$GITHUB_STEP_SUMMARY" || true

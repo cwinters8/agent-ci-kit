@@ -1,0 +1,26 @@
+# Guardrails
+
+What stops an unattended agent from doing damage, enforced by YAML rather than
+by asking the model nicely.
+
+| Guardrail | Enforced by |
+| --- | --- |
+| Only maintainers can start a run | label/comment triggers need write access; the action re-checks that the actor is a human with write access |
+| Agent never touches CI, agent config or secrets | `Guardrails` step refuses to open a PR if the diff touches `.github/`, `.claude/` or `.env*`, and labels the issue `agent:needs-human` |
+| Large diffs are flagged | diffs over `AGENT_MAX_DIFF_LINES` get `agent:large-diff` |
+| Agent cannot browse the web | `--disallowedTools WebFetch,WebSearch` (blocks prompt injection from fetched pages and data exfiltration by URL) |
+| Agent can only run listed commands | `--allowedTools` allowlist; anything else is denied in a headless run |
+| Agent never merges or pushes to main | no merge tool granted; branch protection on main (set this up) |
+| PRs open as drafts | `gh pr create --draft` in the workflow |
+| Credentials are step-scoped | secrets passed to the action step only, never a job-level `env:` |
+
+## Before enabling on a public repo
+
+The defaults assume a private repo where every commenter is you or a bot you
+installed. On a public repo:
+
+- Keep `allowed_non_write_users` unset (the default). Never set it to `*`.
+- Disable the `claude-review-sweep.yml` schedule, or restrict it to PRs by
+  maintainers: it reads review text from anyone and can push.
+- Never point agent workflows at a self-hosted runner (see `vps/README.md`).
+- Turn on branch protection requiring review on the default branch.

@@ -1,0 +1,20 @@
+{
+  "skills": [
+    "action-versions",
+    "code-review",
+    "pr-preflight",
+    "review-sweep",
+    "security-review"
+  ],
+  "version": "1.0.1",
+  "files": {
+    "action-versions/SKILL.md": "1be478896dfc8be626bdd548a5189555143d6a923f1ecb53d8add5f9f5b72c0d",
+    "code-review/SKILL.md": "4087e12c117a71e54bc34a1f2e17b78826d974126823df347cf37f00fd23dbde",
+    "pr-preflight/SKILL.md": "e1d3f91f7c8e62e490b4e5d91f3d245a7d31c889817db45e1c3b209e367d9c95",
+    "review-sweep/SKILL.md": "51d144547cb96d07c02281f2013802d0934403f2bb2d99544e6e0f94fb491520",
+    "security-review/SKILL.md": "b9507be6e22ae6100ef5cae45790aff6c266f87c7ab880fbddcbaf3f1217f97a",
+    "security-review/references/ci-workflows.md": "15ae157a418946ab51b19fc280bef10160adbbc2c6536836ee110b429ad562b7",
+    "security-review/references/mobile-release.md": "b4b42c080047319513c3092ef51f49dc016e55489128e8667600935666307faa",
+    "security-review/references/postgres-rls.md": "3cecf3dad2143c9bfc96857cbfe76336eae5a4313e89c89db6a321e7f3439207"
+  }
+}

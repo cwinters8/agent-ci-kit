@@ -1,0 +1,70 @@
+# @claude on an issue or PR: the human-in-the-loop half of the fix loop.
+#
+# The fix workflow opens a draft PR; you review it like any other. When you want
+# a change, comment `@claude <what to change>` on the PR and the agent pushes to
+# the same branch. That is the review gate: nothing merges without you, and you
+# never have to check the branch out to steer it.
+#
+# Interactive runs default to Sonnet with a lower turn cap than a full fix,
+# because a review follow-up is a small, scoped edit.
+#
+# Same secrets as claude-fix-issue.yml. Only users with write access can trigger
+# it; the action enforces that.
+
+name: Claude
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+concurrency:
+  group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Your project's toolchain. The agent runs the same checks CI runs, so it
+      # needs the same setup pr-checks.yml has.
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Lets the agent read CI logs on the PR it is fixing.
+          additional_permissions: |
+            actions: read
+          claude_args: >-
+            --model ${{ vars.AGENT_INTERACTIVE_MODEL || 'sonnet' }}
+            --max-turns ${{ vars.AGENT_MAX_TURNS_INTERACTIVE || '20' }}
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(make check),Bash(make fmt-check),Bash(make vet),Bash(make test),Bash(go test:*),Bash(go vet:*),Bash(go build:*),Bash(gofmt:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*)"
+            --disallowedTools "WebFetch,WebSearch"

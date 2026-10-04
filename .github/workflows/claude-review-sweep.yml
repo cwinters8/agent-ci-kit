@@ -1,0 +1,74 @@
+# Daily review sweep across every open PR.
+#
+# Reviewers (a bot, Codex, a human) leave comments at any hour. This runs the
+# `review-sweep` skill once a day: every unhandled comment ends in a terminal
+# state (fixed and pushed, or declined with a reason), and a PR with green CI,
+# no open threads and an approving verdict gets one "ready to merge" comment.
+# Your only job is the merge button.
+#
+# Why a daily sweep instead of a run per comment: one sweep that batches every
+# PR costs one session. A run per comment costs one session per comment, and
+# review bots comment in bursts.
+#
+# Trust: the sweep reads review comment text and can push. Fine for a private
+# repo where every commenter is you or a bot you installed. On a public repo,
+# restrict it (see docs/GUARDRAILS.md) before enabling the schedule.
+
+name: Claude review sweep
+
+on:
+  schedule:
+    # 13:00 UTC daily. Pick a time before you usually check GitHub.
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Sweep one PR number (blank = all open PRs)'
+        required: false
+
+concurrency:
+  group: claude-review-sweep
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Your project's toolchain. The agent runs the same checks CI runs, so it
+      # needs the same setup pr-checks.yml has.
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run review sweep
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Run the review-sweep skill in .claude/skills/review-sweep/ on ${{ github.repository }}
+            ${{ github.event.inputs.pr && format('for PR #{0} only', github.event.inputs.pr) || 'across every open PR' }}.
+            Use the gh CLI for GitHub reads and writes.
+          claude_args: >-
+            --model ${{ vars.AGENT_SWEEP_MODEL || 'sonnet' }}
+            --max-turns ${{ vars.AGENT_MAX_TURNS_SWEEP || '60' }}
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Skill,Bash(gh pr:*),Bash(gh api:*),Bash(gh run:*),Bash(make check),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(git:*)"
+            --disallowedTools "WebFetch,WebSearch"
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PR_TOKEN || github.token }}
