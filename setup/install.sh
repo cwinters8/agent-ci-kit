@@ -24,11 +24,26 @@ if [ -e "$dest" ] && [ ! -f "$dest/.installed-by-agent-ci-kit" ]; then
   exit 1
 fi
 
-rm -rf "$dest"
-mkdir -p "$dest"
-cp -R "$src/." "$dest/"
-printf '%s\n' "$kit" > "$dest/kit-path"
-touch "$dest/.installed-by-agent-ci-kit"
+# Build the new copy beside the old one and swap only once it is complete, so
+# an interrupted update leaves the previous install working (and re-runnable).
+parent="$(dirname "$dest")"
+mkdir -p "$parent"
+stage="$(mktemp -d "$parent/.adopt-kit.new.XXXXXX")"
+trap 'rm -rf "$stage"' EXIT
+cp -R "$src/." "$stage/"
+printf '%s\n' "$kit" > "$stage/kit-path"
+touch "$stage/.installed-by-agent-ci-kit"
+chmod 755 "$stage"
+
+if [ -e "$dest" ]; then
+  old="$(mktemp -d "$parent/.adopt-kit.old.XXXXXX")"
+  mv "$dest" "$old/adopt-kit"
+  mv "$stage" "$dest"
+  rm -rf "$old"
+else
+  mv "$stage" "$dest"
+fi
+trap - EXIT
 
 echo "Installed /adopt-kit to $dest (kit: $kit)"
 echo "Next: open Claude Code in your project's repo and run /adopt-kit"

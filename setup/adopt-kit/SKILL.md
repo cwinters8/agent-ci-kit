@@ -28,7 +28,9 @@ work and keep questions few. The finished state:
   `gh secret set` in their own terminal.
 - **Ask before anything leaves the machine.** Labels, variables, rulesets,
   issues, pushes: show the exact commands, batched, and get one yes.
-- **Never commit to the default branch.** Work on `agent-ci-kit-setup`.
+- **Never commit to the default branch.** Work on `claude/agent-ci-kit-setup`.
+  The kit's conventions keep agent branches under `claude/`, and this run is
+  one.
 - **Never overwrite a file the user already has.** Merge into it (rules in
   step 4) and say what you merged.
 - **Ask only what the repo cannot answer.** Use the AskUserQuestion tool when
@@ -53,7 +55,14 @@ Stop and say why if any of these fail:
   older than this skill: tell them to `git pull` in `$KIT` and re-run
   `bash setup/install.sh`.
 
-Then `git switch -c agent-ci-kit-setup`.
+Then branch from the up-to-date default branch, not from whatever is checked
+out, so no unrelated commits ride along in the setup PR:
+
+```
+default="$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)"
+git fetch origin "$default"
+git switch -c claude/agent-ci-kit-setup "origin/$default"
+```
 
 ## 2. Survey the repo
 
@@ -85,7 +94,12 @@ No questions yet. Work out, and note the file that told you each answer:
 - **Project basics** for AGENTS.md: what it is, layout, how to run it.
 
 Then prove the commands. Run `install` and every named command locally. A
-command that fails here fails in CI, so fix it or raise it. Each command
+command that fails here fails in CI, so fix it or raise it. Run `format` last:
+it may rewrite files. Afterwards `git status --porcelain` must be empty apart
+from changes you meant to make; revert anything a command touched
+(`git restore .` is safe, the tree was clean at preflight) and, if `format`
+changed files, tell the user their code is not formatted rather than folding
+those changes into the setup PR. Each command
 must be one plain command (the schema's `$defs.command.pattern`: no
 quotes, `&&`, pipes or `$`). If the gate is a chain, add a Makefile target or
 package script that runs it, and say you did: that change goes in the setup PR.
@@ -106,7 +120,8 @@ Usually that is:
   (`claude-review-sweep.yml`), PR checks (`pr-checks.yml`), image builds
   (`build-image.yml`; only with a Dockerfile). Recommend the first three. Add
   PR checks unless their CI already runs the same gate on every PR; running
-  it twice only costs minutes. The VPS runner (`vps/`) is a separate guide module; leave it out.
+  it twice only costs minutes. The VPS runner (`vps/`) is a separate guide
+  module; leave it out.
 - **Budget**: the defaults (10 fix runs a day, Sonnet unless labeled
   `agent:fix-opus`) suit most solo projects. Ask whether they want different
   caps; only non-default answers become repo variables.
@@ -122,7 +137,7 @@ Copy from `$KIT`, keeping paths:
 
 - `.github/workflows/`: the workflows they chose
 - `.github/actions/project-setup/`
-- `.github/ISSUE_TEMPLATE/agent-fix.yml`
+- `.github/ISSUE_TEMPLATE/agent-fix.yml`, with the fix workflow
 - `.claude/skills/` and `.claude/skills.json` (vendored; copy as is)
 - `.claude/hooks/session-start.sh`, `.claude/settings.json`
 - `.claude/agent-ci.schema.json`
@@ -152,7 +167,10 @@ Fill in:
 - **`.claude/project-profile.md`**: keep every section heading of the kit's
   copy, in order, and rewrite each body for their project. A section with
   nothing to say gets "None." rather than being deleted; the skills read
-  these by heading.
+  these by heading. In **Repo**, keep the sentence permitting
+  `review-sweep`'s reaction-count approval shortcut only for a private repo
+  with a single maintainer. Otherwise delete it: the sweep would count an
+  outsider's reaction as approval. Doctor fails on it.
 - **`AGENTS.md`**: replace the project sections (Project status, What this
   project is, Layout, the sample's API table, Commands) with theirs. Keep the
   agent sections (Agents in CI, QA and code review, Session behavior, Shared
@@ -162,7 +180,11 @@ Fill in:
   globs, manifests, `.claude/agent-ci.json`, the setup action and the
   workflow file itself. GitHub reads these before a runner starts, so they
   cannot come from the config. Keep `build-image.yml`'s list a superset of
-  `image.inputs`. Leave the rest of the workflow YAML alone.
+  `image.inputs`.
+- **Default branch**: `build-image.yml` builds on pushes to `main`. If their
+  default branch has another name, change its `branches:` filter to match.
+
+Leave the rest of the workflow YAML alone.
 
 Run `doctor.sh`. Fix every ✗ above the GitHub section before going on.
 
@@ -213,7 +235,7 @@ When they say done, re-run doctor and confirm the secret lines turned ✓.
 
 ## 6. Open the setup PR
 
-Commit everything on `agent-ci-kit-setup` with a message that lists what was
+Commit everything on `claude/agent-ci-kit-setup` with a message that lists what was
 added, push, and `gh pr create`. The PR body says:
 
 - what you detected and from where,

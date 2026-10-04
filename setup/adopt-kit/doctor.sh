@@ -23,6 +23,7 @@ cfg=.claude/agent-ci.json
 schema=.claude/agent-ci.schema.json
 labels=(agent:fix agent:fix-opus agent:needs-human agent:large-diff)
 skills=(action-versions code-review pr-preflight review-sweep security-review)
+has() { [ -f ".github/workflows/$1.yml" ]; }  # is this kit workflow installed?
 
 # ---------------------------------------------------------------- tools
 section "Tools"
@@ -38,9 +39,12 @@ cd "$root" || exit 1
 section "Kit files"
 for f in AGENTS.md CLAUDE.md .claude/project-profile.md "$cfg" "$schema" \
   .claude/settings.json .claude/hooks/session-start.sh \
-  .github/actions/project-setup/action.yml .github/ISSUE_TEMPLATE/agent-fix.yml; do
+  .github/actions/project-setup/action.yml; do
   if [ -f "$f" ]; then ok "$f"; else fail "$f missing"; fi
 done
+if has claude-fix-issue && [ ! -f .github/ISSUE_TEMPLATE/agent-fix.yml ]; then
+  warn ".github/ISSUE_TEMPLATE/agent-fix.yml missing; issues for the fix agent will lack a repro"
+fi
 if [ ! -f .github/workflows/pr-checks.yml ]; then
   warn "no pr-checks.yml: fine only if your own CI runs commands.check on every PR, agent PRs included"
 fi
@@ -59,7 +63,9 @@ fi
 if [ -f CLAUDE.md ] && ! grep -q '@AGENTS.md' CLAUDE.md; then
   warn "CLAUDE.md does not import @AGENTS.md; Claude Code may not read the agent rules"
 fi
-if [ -f .claude/settings.json ] && ! grep -q 'session-start.sh' .claude/settings.json; then
+if [ -f .claude/settings.json ] && ! jq empty .claude/settings.json 2> /dev/null; then
+  fail ".claude/settings.json is not valid JSON; Claude Code will not load it"
+elif [ -f .claude/settings.json ] && ! jq -e '[.hooks.SessionStart[]?.hooks[]?.command] | any(contains("session-start.sh"))' .claude/settings.json > /dev/null; then
   warn ".claude/settings.json does not run hooks/session-start.sh; cloud sessions will start without dependencies"
 fi
 
@@ -137,19 +143,30 @@ fi
 if [ -f .claude/project-profile.md ] && grep -qE 'internal/store|sample todo API' .claude/project-profile.md; then
   fail ".claude/project-profile.md still describes the kit's sample todo API"; leftover=1
 fi
-has_go=0
-git ls-files '*.go' | grep -q . && has_go=1
-if [ "$has_go" = 0 ]; then
+# Lists a workflow's `paths:` entries, one per line, without quotes.
+path_filters() {
+  awk '/^ *paths:/ { on = 1; next } on && /^ *(#|$)/ { next } on && /^ *- / { sub(/^ *- */, ""); gsub(/["'"'"']/, ""); print; next } on { exit }' "$1"
+}
+uses_go=1
+if ! git ls-files '*.go' | grep -q .; then
+  uses_go=0
   if [ -f "$cfg" ] && jq -e '.toolchain.go' "$cfg" > /dev/null 2>&1; then
     fail "$cfg sets up Go, but the repo has no Go files"; leftover=1
   fi
-  for w in pr-checks build-image; do
-    f=".github/workflows/$w.yml"
-    if [ -f "$f" ] && grep -qE "^\s*- '\*\*\.go'" "$f"; then
-      fail "$f paths: filter still lists the sample's Go files; point it at your source"; leftover=1
-    fi
-  done
+elif [ -f "$cfg" ] && ! jq -e '.toolchain.go' "$cfg" > /dev/null 2>&1; then
+  uses_go=0
 fi
+stacks="$(jq -r '.toolchain // {} | keys | map(select(. != "go")) | join(", ")' "$cfg" 2> /dev/null || true)"
+for w in pr-checks build-image; do
+  f=".github/workflows/$w.yml"
+  [ -f "$f" ] || continue
+  filters="$(path_filters "$f")"
+  if grep -qxF '**.go' <<< "$filters" && [ "$uses_go" = 0 ]; then
+    fail "$f paths: filter still lists the sample's Go files; point it at your source"; leftover=1
+  elif [ -n "$stacks" ] && ! grep -vqE '\.go$|^go\.(mod|sum)$|^Makefile$|^Dockerfile$|^setup/|^\.claude/|^\.github/' <<< "$filters"; then
+    fail "$f paths: filter covers only Go and kit files; add your $stacks sources"; leftover=1
+  fi
+done
 if [ -f .github/workflows/build-image.yml ]; then
   dockerfile="$(jq -r '.image.dockerfile // "Dockerfile"' "$cfg" 2> /dev/null || echo Dockerfile)"
   if [ ! -f "$dockerfile" ]; then
@@ -190,7 +207,9 @@ else
     else
       fail "no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret"
     fi
-    if grep -qx AGENT_PR_TOKEN <<< "$secrets"; then
+    if ! has claude-fix-issue && ! has claude-review-sweep; then
+      :
+    elif grep -qx AGENT_PR_TOKEN <<< "$secrets"; then
       ok "AGENT_PR_TOKEN secret set"
     else
       fail "no AGENT_PR_TOKEN secret; CI will not run on agent PRs"
@@ -199,12 +218,28 @@ else
     skip "could not list secrets (needs admin); check Settings > Secrets and variables > Actions"
   fi
 
-  if have="$(gh api "repos/$repo/labels" --paginate --jq '.[].name' 2> /dev/null)"; then
+  if ! has claude-fix-issue; then
+    :
+  elif have="$(gh api "repos/$repo/labels" --paginate --jq '.[].name' 2> /dev/null)"; then
     missing=()
     for l in "${labels[@]}"; do grep -qxF "$l" <<< "$have" || missing+=("$l"); done
     if [ "${#missing[@]}" = 0 ]; then ok "agent labels exist"; else fail "missing labels: ${missing[*]}"; fi
   else
     skip "could not list labels"
+  fi
+
+  # The sample profile lets review-sweep count an unattributed reaction as
+  # approval, which is only safe on a private repo with a single maintainer.
+  if [ -f .claude/project-profile.md ] && grep -q 'approval shortcut is' .claude/project-profile.md; then
+    if [ "$(jq -r .visibility <<< "$info")" = public ]; then
+      fail "project profile permits review-sweep's reaction-count approval shortcut on a public repo; remove that line"
+    elif people="$(gh api "repos/$repo/collaborators" --paginate --jq '.[].login' 2> /dev/null)"; then
+      if [ "$(grep -c . <<< "$people")" -gt 1 ]; then
+        fail "project profile permits review-sweep's reaction-count approval shortcut, but the repo has more than one collaborator; remove that line"
+      fi
+    else
+      warn "project profile permits review-sweep's reaction-count approval shortcut; keep it only if you are the sole maintainer"
+    fi
   fi
 
   # Rulesets first (readable without admin), then classic branch protection.

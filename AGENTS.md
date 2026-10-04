@@ -72,7 +72,8 @@ Every error body is `{"error": "..."}` with `Content-Type: application/json`.
 
 ## Commands
 
-- `make check`: gofmt check, `go vet`, `go test -race`. Run before every commit.
+- `make check`: gofmt check, `go vet`, `go test -race`, and `setup/test.sh`
+  (the adopt-kit installer and doctor). Run before every commit.
   It is `commands.check` in `.claude/agent-ci.json`, which also names the
   `format`, `lint`, `test` and `build` commands.
 - `make run`: start the server on `:8080`.
