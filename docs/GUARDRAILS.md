@@ -7,6 +7,7 @@ by asking the model nicely.
 | --- | --- |
 | Only maintainers can start a run | label/comment triggers need write access; the action re-checks that the actor is a human with write access |
 | Agent never touches CI, agent config or secrets | `Guardrails` step refuses to open a PR if the diff touches `.github/`, `.claude/`, `.env*` or a `protected_paths` entry in `.claude/agent-ci.json`, and labels the issue `agent:needs-human`. The config can add paths, never remove the fixed three |
+| Review bots cannot spend at will | `claude-review-respond.yml` starts only for maintainers and bots in `AGENT_REVIEW_BOTS`, only on agent branches, and never for `claude[bot]`, so the agent's own replies cannot loop |
 | Large diffs are flagged | diffs over `AGENT_MAX_DIFF_LINES` get `agent:large-diff` |
 | Agent cannot browse the web | `--disallowedTools WebFetch,WebSearch` (blocks prompt injection from fetched pages and data exfiltration by URL) |
 | Agent can only run listed commands | `--allowedTools` allowlist built from the named `commands` (never `install`) and `allow`, read from the default branch so a PR cannot widen it; anything else is denied in a headless run |
@@ -22,5 +23,7 @@ installed. On a public repo:
 - Keep `allowed_non_write_users` unset (the default). Never set it to `*`.
 - Disable the `claude-review-sweep.yml` schedule, or restrict it to PRs by
   maintainers: it reads review text from anyone and can push.
+  `claude-review-respond.yml` already ignores reviewers without write access
+  and unlisted bots.
 - Never point agent workflows at a self-hosted runner (see `vps/README.md`).
 - Turn on branch protection requiring review on the default branch.

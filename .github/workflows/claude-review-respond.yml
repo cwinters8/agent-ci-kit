@@ -1,0 +1,161 @@
+# Answer review feedback on agent PRs as soon as it lands.
+#
+# When a reviewer (Codex, another bot you allow, or a maintainer) submits a
+# review on a PR the fix workflow opened, this runs the `review-sweep` skill on
+# that one PR: every unhandled comment ends fixed and pushed, or declined with a
+# reply. No `@claude` needed. The daily `claude-review-sweep.yml` stays as the
+# backstop for human PRs, capped runs and dropped webhooks.
+#
+# Scope: only PRs whose branch starts with `AGENT_REVIEW_BRANCH_PREFIX`
+# (default `claude/issue-`, the fix workflow's branches). Human PRs and PRs a
+# live Claude Code session is driving keep the explicit `@claude` gate, so two
+# agents never race on one branch.
+#
+# Cost: one run per submitted review, not per comment (a review with ten inline
+# comments is one event). Runs on a PR queue behind each other and a burst
+# collapses to one pending run, which triages everything at once. A hard
+# per-PR daily cap (`AGENT_REVIEW_DAILY_CAP`) bounds a reviewer and the agent
+# trading rounds; the skill's own stop conditions bound it again.
+#
+# Loops: the agent writes as claude[bot], which is never an allowed reviewer,
+# so its own replies never start a run.
+
+name: Claude review response
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+concurrency:
+  group: claude-review-respond-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Scope and budget
+    # Everything decidable from the event is decided here, so out-of-scope
+    # reviews conclude "skipped" without starting a runner.
+    if: >-
+      startsWith(github.event.pull_request.head.ref, vars.AGENT_REVIEW_BRANCH_PREFIX || 'claude/issue-') &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(github.event.review.body, '@claude') &&
+      !(github.event.review.state == 'approved' && !github.event.review.body) &&
+      (
+        (github.event.review.user.type == 'User' &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)) ||
+        (github.event.review.user.type == 'Bot' &&
+          github.event.review.user.login != 'claude[bot]' &&
+          contains(format(',{0},', vars.AGENT_REVIEW_BOTS || 'chatgpt-codex-connector[bot]'), format(',{0},', github.event.review.user.login)))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: read
+      pull-requests: write
+    outputs:
+      allowed: ${{ steps.budget.outputs.allowed }}
+    steps:
+      # claude.yml answers `@claude` in an inline comment. Leave those reviews
+      # to it rather than running two agents on one review.
+      - name: Skip @claude reviews
+        id: mention
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REVIEW: ${{ github.event.review.id }}
+        run: |
+          hits="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews/$REVIEW/comments" \
+            --jq '.[].body' | grep -c '@claude' || true)"
+          echo "mentioned=$([ "$hits" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Check per-PR daily cap
+        id: budget
+        if: steps.mention.outputs.mentioned == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAP: ${{ vars.AGENT_REVIEW_DAILY_CAP || '5' }}
+          PR: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # Out-of-scope reviews conclude "skipped" and runs replaced in the
+          # concurrency queue conclude "cancelled"; neither spent anything.
+          today="$(date -u +%Y-%m-%d)"
+          used="$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/claude-review-respond.yml/runs" \
+            -f branch="$BRANCH" -f created=">=$today" -F per_page=100 \
+            --jq '[.workflow_runs[] | select(.id != '"$GITHUB_RUN_ID"' and .conclusion != "skipped" and .conclusion != "cancelled")] | length')"
+          echo "Review responses on this PR today: $used / $CAP"
+          if [ "$used" -ge "$CAP" ]; then
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            # Say so once, on the run that hits the cap, not on every review after.
+            if [ "$used" -eq "$CAP" ]; then
+              gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" \
+                --body "Review auto-response cap reached for this PR today ($used/$CAP). The daily sweep picks up the rest, or raise \`AGENT_REVIEW_DAILY_CAP\`."
+            fi
+          else
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  respond:
+    name: Claude triages the review
+    needs: gate
+    if: needs.gate.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write # lets the action exchange OIDC for the Claude App token
+    steps:
+      # The default branch, not the PR: the skill and its rules load from
+      # reviewed code. The skill checks out the PR branch itself to push fixes.
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      # Your toolchain and dependencies, from .claude/agent-ci.json on the
+      # default branch, so a PR cannot widen the command allowlist.
+      - name: Project setup
+        id: project
+        uses: ./.github/actions/project-setup
+        with:
+          config-ref: origin/${{ github.event.repository.default_branch }}
+
+      - name: Run review sweep on this PR
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The action refuses bot-triggered runs unless the bot is listed. The
+          # gate already limited reviewers to this same list.
+          allowed_bots: ${{ vars.AGENT_REVIEW_BOTS || 'chatgpt-codex-connector[bot]' }}
+          prompt: |
+            Run the review-sweep skill in .claude/skills/review-sweep/ on ${{ github.repository }}
+            for PR #${{ github.event.pull_request.number }} only.
+            A review was just submitted: ${{ github.event.review.html_url }}
+            Triage every unhandled comment on the PR, not only that review's.
+            Use the gh CLI for GitHub reads and writes.
+          claude_args: >-
+            --model ${{ vars.AGENT_SWEEP_MODEL || 'sonnet' }}
+            --max-turns ${{ vars.AGENT_MAX_TURNS_REVIEW || '30' }}
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Skill,Bash(gh pr:*),Bash(gh api:*),Bash(gh run:*),${{ steps.project.outputs.allowed-bash }},Bash(git:*)"
+            --disallowedTools "WebFetch,WebSearch"
+
+      - name: Report cost
+        if: always() && steps.claude.outputs.execution_file != ''
+        env:
+          EXEC: ${{ steps.claude.outputs.execution_file }}
+          MODEL: ${{ vars.AGENT_SWEEP_MODEL || 'sonnet' }}
+        run: |
+          [ -f "$EXEC" ] || exit 0
+          jq -r --arg model "$MODEL" '
+            [.[] | select(.type == "result")] | last // {} |
+            "### Review response\n\n| Model | Turns | Duration | Cost (USD) |\n| --- | --- | --- | --- |\n| \($model) | \(.num_turns // "?") | \((.duration_ms // 0) / 1000 | floor)s | \(.total_cost_usd // "?") |"
+          ' "$EXEC" >> "$GITHUB_STEP_SUMMARY" || true

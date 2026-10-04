@@ -6,9 +6,10 @@
 # no open threads and an approving verdict gets one "ready to merge" comment.
 # Your only job is the merge button.
 #
-# Why a daily sweep instead of a run per comment: one sweep that batches every
-# PR costs one session. A run per comment costs one session per comment, and
-# review bots comment in bursts.
+# Agent PRs also get `claude-review-respond.yml`, which runs this same skill on
+# one PR as soon as a review lands. This sweep is the backstop: human PRs,
+# PRs past the per-PR cap, and webhooks GitHub dropped. One sweep that batches
+# every PR costs one session.
 #
 # Trust: the sweep reads review comment text and can push. Fine for a private
 # repo where every commenter is you or a bot you installed. On a public repo,

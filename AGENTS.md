@@ -82,6 +82,7 @@ Every error body is `{"error": "..."}` with `Content-Type: application/json`.
 | --- | --- | --- |
 | `claude-fix-issue.yml` | label `agent:fix` (Sonnet) or `agent:fix-opus` | issue → `claude/` branch → draft PR, behind a daily run cap and protected-path guardrails |
 | `claude.yml` | `@claude` in a comment or review | follow-up edits on the same branch; the human-in-the-loop review gate |
+| `claude-review-respond.yml` | a review submitted on a fix-workflow PR (`claude/issue-*`) | runs `review-sweep` on that PR right away, no `@claude` needed; per-PR daily cap |
 | `claude-review-sweep.yml` | daily schedule, or manual | triage every open review comment to fixed or declined; flag PRs ready to merge |
 | `pr-checks.yml` | PRs touching Go code | `commands.check` from `.claude/agent-ci.json` |
 | `build-image.yml` | pushes to `main` touching Go code | source-hash gate over `image.inputs`: reuse a matching image, build only when inputs changed |
@@ -97,8 +98,9 @@ end to end through the skills in `.claude/skills/`:
 1. **Before pushing:** `pr-preflight`. Mechanical checks, self code-review,
    project-specific and security checks, then push and open a draft PR.
 2. **After review feedback lands:** `review-sweep`. Every unhandled comment ends
-   fixed or declined with a reason. The daily sweep workflow runs it across all
-   open PRs, so nothing depends on a session still being alive.
+   fixed or declined with a reason. On fix-workflow PRs it runs as soon as a
+   review lands; the daily sweep runs it across all open PRs, so nothing
+   depends on a session still being alive.
 
 Targeted skills for recurring failure modes:
 

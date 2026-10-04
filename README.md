@@ -5,8 +5,8 @@ controls that keep that from becoming a surprise bill.
 
 Label an issue `agent:fix`. An agent picks it up on a GitHub runner, finds the
 bug, makes the smallest fix, runs your checks and opens a draft PR. You review
-it, comment `@claude` for changes, and merge. A daily sweep keeps every PR's
-review comments moving while you are away.
+it, comment `@claude` for changes, and merge. Review comments on agent PRs get
+fixed or answered as soon as they land, and a daily sweep catches the rest.
 
 This repo is a working sample: a small Go todo API with the whole kit wired
 around it. Fork it to watch the agents work, then copy the kit files into your
@@ -19,6 +19,7 @@ The kit (copy these into your repo)
   .github/workflows/
     claude-fix-issue.yml     issue -> branch -> draft PR, with routing, caps, guardrails  (modules 1-3)
     claude.yml               @claude follow-ups on PRs: the human review gate            (module 2)
+    claude-review-respond.yml answers each review on an agent PR as it lands            (module 2)
     claude-review-sweep.yml  daily triage of every open review comment                   (module 2)
     pr-checks.yml            the same checks the agent runs, skipped on docs-only PRs    (module 4)
     build-image.yml          source-hash-gated container builds                          (module 4)
@@ -82,7 +83,11 @@ Repo variables (Settings → Variables), all optional:
 | `AGENT_MAX_TURNS_SONNET` / `_OPUS` | 30 / 40 | per fix run |
 | `AGENT_MAX_TURNS_INTERACTIVE` | 20 | per `@claude` run |
 | `AGENT_MAX_TURNS_SWEEP` | 60 | per daily sweep |
+| `AGENT_MAX_TURNS_REVIEW` | 30 | per review response |
+| `AGENT_REVIEW_DAILY_CAP` | 5 | review responses per PR per UTC day |
+| `AGENT_REVIEW_BRANCH_PREFIX` | `claude/issue-` | PRs that get review responses without `@claude` |
+| `AGENT_REVIEW_BOTS` | `chatgpt-codex-connector[bot]` | review bots that trigger a response; comma-separated, no spaces, with the `[bot]` suffix |
 | `AGENT_MAX_DIFF_LINES` | 400 | above this, PR gets `agent:large-diff` |
-| `AGENT_INTERACTIVE_MODEL` / `AGENT_SWEEP_MODEL` | sonnet | |
+| `AGENT_INTERACTIVE_MODEL` / `AGENT_SWEEP_MODEL` | sonnet | `AGENT_SWEEP_MODEL` also runs review responses |
 
 See `docs/COST-CONTROLS.md`.
