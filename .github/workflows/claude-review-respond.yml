@@ -142,6 +142,12 @@ jobs:
             A review was just submitted: ${{ github.event.review.html_url }}
             Triage every unhandled comment on the PR, not only that review's.
             Use the gh CLI for GitHub reads and writes.
+            After checking out the PR branch, run `commands.install` from
+            .claude/agent-ci.json before any checks, so the PR is not tested
+            with the default branch's dependencies. The runtimes on this runner
+            are the default branch's: if the PR changes a `toolchain` version
+            file or .claude/agent-ci.json itself, do not judge it by local
+            checks; use the result of its own CI run instead.
           claude_args: >-
             --model ${{ vars.AGENT_SWEEP_MODEL || 'sonnet' }}
             --max-turns ${{ vars.AGENT_MAX_TURNS_REVIEW || '30' }}
