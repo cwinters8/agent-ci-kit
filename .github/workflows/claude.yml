@@ -43,13 +43,18 @@ jobs:
       actions: read
       id-token: write
     steps:
+      # Review events check out the PR's merge ref on their own. A comment on a
+      # PR is an issue_comment, which would check out the default branch, so
+      # point it at the PR head: setup must install the PR's toolchain and
+      # dependencies, not the default branch's.
       - name: Check out
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.issue.pull_request && format('refs/pull/{0}/head', github.event.issue.number) || '' }}
           fetch-depth: 0
 
-      # On a PR the checkout above is the PR's merge ref, so its copy of the
-      # setup action is PR code. Run the default branch's copy instead, so a PR
+      # On a PR the checkout above is PR code, including its copy of the setup
+      # action. Run the default branch's copy instead, so a PR
       # cannot change what the setup step itself does. (Its install and the
       # agent's checks still run the PR's code, as any CI on the PR does.)
       - name: Check out trusted setup action

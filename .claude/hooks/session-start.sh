@@ -24,7 +24,7 @@ cd "$CLAUDE_PROJECT_DIR"
 if [ -f .claude/agent-ci.json ] && command -v jq > /dev/null; then
   install_cmd="$(jq -r '.commands.install // ""' .claude/agent-ci.json)"
   [ -n "$install_cmd" ] || exit 0
-  install=(bash -c "$install_cmd")
+  install=(bash -euo pipefail -c "$install_cmd")
 elif [ -f go.mod ]; then
   install=(go mod download)
 elif [ -f pnpm-lock.yaml ]; then
