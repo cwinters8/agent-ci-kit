@@ -60,8 +60,15 @@ jobs:
           sparse-checkout: .github/actions
           persist-credentials: false
 
-      - name: Keep the trusted copy out of the agent's commits
-        run: echo '/.agent-ci-trusted/' >> .git/info/exclude
+      - name: Prepare the trusted copy
+        run: |
+          echo '/.agent-ci-trusted/' >> .git/info/exclude
+          # The PR that first adds the kit has no setup action on the default
+          # branch yet. Say so instead of failing on a missing file.
+          if [ ! -f .agent-ci-trusted/.github/actions/project-setup/action.yml ]; then
+            echo "::error::The project-setup action is not on the default branch yet. This workflow works once the kit is merged."
+            exit 1
+          fi
 
       # Your toolchain and dependencies, from .claude/agent-ci.json. The config
       # is read from the default branch too, so a PR cannot widen the command
