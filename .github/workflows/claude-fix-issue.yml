@@ -157,8 +157,9 @@ jobs:
                open a PR that does, so doing it wastes the run. Change the
                dependency files (`dependency_files` there) only when the bug is in
                a dependency.
-            5. Run every command in `checks` in .claude/agent-ci.json, in order.
-               All must pass before you commit.
+            5. .claude/agent-ci.json `commands` names this project's commands by
+               purpose. Iterate with `test`; run `format` if it exists, then
+               `check`, which must pass before you commit.
             6. Commit with a message that says what was wrong and why the change fixes
                it, then push. Do not open a PR yourself; the workflow does that.
           claude_args: >-

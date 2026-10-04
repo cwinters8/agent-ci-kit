@@ -44,8 +44,9 @@ the server empties it. Routes use Go 1.22+ `net/http` method patterns.
   request logging.
 - `Dockerfile`: static binary on distroless, non-root.
 - `Makefile`: `make check` is the one command CI and agents both run.
-- `.claude/agent-ci.json`: the toolchain, install and check commands, agent
-  command allowlist and protected paths the workflows read. Schema alongside;
+- `.claude/agent-ci.json`: the toolchain, the project's commands named by
+  purpose (install, format, lint, test, build, check), extra agent permissions
+  and protected paths the workflows read. Schema alongside;
   reference in `docs/PROJECT-CONFIG.md`.
 - `.claude/project-profile.md`: the project facts the vendored skills read.
 - `.claude/skills/`: vendored skills. Never hand-edit; see
@@ -70,7 +71,8 @@ Every error body is `{"error": "..."}` with `Content-Type: application/json`.
 ## Commands
 
 - `make check`: gofmt check, `go vet`, `go test -race`. Run before every commit.
-  It is the only entry in `checks` in `.claude/agent-ci.json`.
+  It is `commands.check` in `.claude/agent-ci.json`, which also names the
+  `format`, `lint`, `test` and `build` commands.
 - `make run`: start the server on `:8080`.
 - `make image`: build the container (needs Docker).
 
@@ -81,7 +83,7 @@ Every error body is `{"error": "..."}` with `Content-Type: application/json`.
 | `claude-fix-issue.yml` | label `agent:fix` (Sonnet) or `agent:fix-opus` | issue → `claude/` branch → draft PR, behind a daily run cap and protected-path guardrails |
 | `claude.yml` | `@claude` in a comment or review | follow-up edits on the same branch; the human-in-the-loop review gate |
 | `claude-review-sweep.yml` | daily schedule, or manual | triage every open review comment to fixed or declined; flag PRs ready to merge |
-| `pr-checks.yml` | PRs touching Go code | every `checks` command in `.claude/agent-ci.json` |
+| `pr-checks.yml` | PRs touching Go code | `commands.check` from `.claude/agent-ci.json` |
 | `build-image.yml` | pushes to `main` touching Go code | source-hash gate over `image.inputs`: reuse a matching image, build only when inputs changed |
 
 Agents never push to the default branch and never merge. Merging is the

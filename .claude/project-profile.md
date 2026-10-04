@@ -24,9 +24,11 @@ collaborators you do not control.
 
 ## Mechanical checks
 
-Every command in `checks` in `.claude/agent-ci.json`, in order. That file is
-the machine-readable source: `.github/workflows/pr-checks.yml` runs the same
-list, so passing locally means passing CI. For this project it is:
+`commands.check` in `.claude/agent-ci.json` (a command, or a list run in
+order). That file is the machine-readable source:
+`.github/workflows/pr-checks.yml` runs the same gate, so passing locally means
+passing CI. Run `commands.format` first if the project has one. For this
+project the gate is:
 
 - `make check`: runs, in order, `gofmt -l .` (fails on any unformatted file),
   `go vet ./...`, `go test -race -count=1 ./...`.

@@ -3,17 +3,15 @@
   "toolchain": {
     "go": { "version_file": "go.mod" }
   },
-  "install": "go mod download",
-  "checks": ["make check"],
-  "agent_commands": [
-    "make fmt-check",
-    "make vet",
-    "make test",
-    "go test:*",
-    "go vet:*",
-    "go build:*",
-    "gofmt:*"
-  ],
+  "commands": {
+    "install": "go mod download",
+    "format": "make fmt",
+    "lint": "make vet",
+    "test": "make test",
+    "build": "make build",
+    "check": "make check"
+  },
+  "allow": ["make fmt-check", "go test:*", "go vet:*", "go build:*", "gofmt:*"],
   "dependency_files": ["go.mod", "go.sum"],
   "protected_paths": [],
   "image": {

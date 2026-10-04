@@ -16,16 +16,16 @@ inputs:
     required: false
     default: ''
   install:
-    description: Run the config's `install` command after the toolchain is set up.
+    description: Run `commands.install` after the toolchain is set up.
     required: false
     default: 'true'
 
 outputs:
-  checks:
-    description: The `checks` commands, one per line.
-    value: ${{ steps.cfg.outputs.checks }}
+  check:
+    description: The `commands.check` gate, one command per line.
+    value: ${{ steps.cfg.outputs.check }}
   allowed-bash:
-    description: '`checks` + `agent_commands` as comma-separated Bash(...) entries for --allowedTools.'
+    description: 'Every named command except install, plus `allow`, as comma-separated Bash(...) entries for --allowedTools.'
     value: ${{ steps.cfg.outputs.allowed-bash }}
   protected-pattern:
     description: ERE matching `protected_paths`; empty when there are none.
@@ -56,13 +56,21 @@ runs:
           exit 1
         fi
 
-        # Commands land inside --allowedTools "...", so anything that could
-        # break out of that string or chain a second command is rejected.
-        errors="$(jq -r '
-          def cmd: type == "string" and test("^[A-Za-z0-9 ._:/*=@+-]+$");
+        # Named commands (except install) and `allow` land inside
+        # --allowedTools "...", so anything that could break out of that
+        # string or chain a second command is rejected.
+        lib='
+          def roles: ["install", "format", "lint", "typecheck", "test", "build", "check"];
+          def list: if type == "array" then .[] else . end;
+          def check: [.commands.check // empty | list];
+          def granted: [.commands // {} | to_entries[] | select(.key != "install") | .value | list] + (.allow // []);
+          def cmd: type == "string" and test("^[A-Za-z0-9 ._:/*=@+-]+$");'
+        errors="$(jq -r "$lib"'
           [
-            (if (.checks | type) != "array" or (.checks | length) == 0 then "checks: needs at least one command" else empty end),
-            ((.checks // []) + (.agent_commands // []) | .[] | select(cmd | not) | "command not allowed (use one plain command, no quotes or shell operators): \(tojson)"),
+            (if (.commands | type) != "object" then "commands: required" else empty end),
+            (.commands // {} | keys[] | select(. as $k | roles | index([$k]) | not) | "commands.\(.): unknown; use one of \(roles | join(", "))"),
+            (if (check | length) == 0 then "commands.check: required, the gate CI and agents run before pushing" else empty end),
+            (granted[] | select(cmd | not) | "command not allowed (use one plain command, no quotes or shell operators): \(tojson)"),
             ((.protected_paths // [])[] | select(type != "string" or length == 0) | "protected_paths: entries must be non-empty strings")
           ] | .[]' <<< "$cfg")" || { echo "::error file=$file::Not valid JSON, or a field has the wrong type."; exit 1; }
         if [ -n "$errors" ]; then
@@ -70,7 +78,7 @@ runs:
           exit 1
         fi
 
-        q() { jq -r "$1" <<< "$cfg"; }
+        q() { jq -r "$lib $1" <<< "$cfg"; }
         delim="EOF_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
         {
           echo "go=$(q '.toolchain.go != null')"
@@ -81,11 +89,11 @@ runs:
           echo "python=$(q '.toolchain.python != null')"
           echo "python-version-file=$(q '.toolchain.python.version_file // ""')"
           echo "dependency-files=$(q '(.dependency_files // []) | join(" ")')"
-          echo "allowed-bash=$(q '(.checks + (.agent_commands // [])) | reduce .[] as $c ([]; if index([$c]) then . else . + [$c] end) | map("Bash(\(.))") | join(",")')"
+          echo "allowed-bash=$(q 'granted | reduce .[] as $c ([]; if index([$c]) then . else . + [$c] end) | map("Bash(\(.))") | join(",")')"
           pattern="$(q '(.protected_paths // [])[]' | sed -e 's/[][\.*^$+?(){}|]/\\&/g' | paste -sd'|' -)"
           echo "protected-pattern=${pattern:+^($pattern)}"
-          echo "install<<$delim"; q '.install // ""'; echo "$delim"
-          echo "checks<<$delim"; q '.checks[]'; echo "$delim"
+          echo "install<<$delim"; q '.commands.install // ""'; echo "$delim"
+          echo "check<<$delim"; q 'check[]'; echo "$delim"
         } >> "$GITHUB_OUTPUT"
 
     - name: Set up Go

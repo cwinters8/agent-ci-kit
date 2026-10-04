@@ -1,8 +1,11 @@
 # The same checks CI and the agents run. `make check` passing locally means
 # pr-checks.yml will pass.
-.PHONY: check fmt-check vet test run build image
+.PHONY: check fmt fmt-check vet test run build image
 
 check: fmt-check vet test
+
+fmt:
+	gofmt -w .
 
 fmt-check:
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi

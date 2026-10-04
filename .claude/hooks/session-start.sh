@@ -13,11 +13,11 @@ fi
 
 cd "$CLAUDE_PROJECT_DIR"
 
-# `install` in .claude/agent-ci.json, the same command CI runs. Without a
+# `commands.install` in .claude/agent-ci.json, the same command CI runs. Without a
 # config (or jq), guess from what the repo contains.
 install_cmd=""
 if [ -f .claude/agent-ci.json ] && command -v jq > /dev/null; then
-  install_cmd="$(jq -r '.install // ""' .claude/agent-ci.json)"
+  install_cmd="$(jq -r '.commands.install // ""' .claude/agent-ci.json)"
 fi
 
 if [ -n "$install_cmd" ]; then

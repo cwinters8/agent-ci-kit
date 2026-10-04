@@ -4,16 +4,21 @@
   "description": "Your project's toolchain and commands, read by the kit's workflows and session hook. See docs/PROJECT-CONFIG.md.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["toolchain", "checks"],
+  "required": [
+    "toolchain",
+    "commands"
+  ],
   "$defs": {
     "command": {
       "type": "string",
-      "description": "One command, no shell operators. A trailing `:*` allows any arguments (Claude Code permission syntax).",
+      "description": "One command, no shell operators. In `allow`, a trailing `:*` allows any arguments (Claude Code permission syntax).",
       "pattern": "^[A-Za-z0-9 ._:/*=@+-]+$"
     }
   },
   "properties": {
-    "$schema": { "type": "string" },
+    "$schema": {
+      "type": "string"
+    },
     "toolchain": {
       "description": "Runtimes to install on the runner before anything else runs. Any combination; empty means the runner image already has what you need.",
       "type": "object",
@@ -22,71 +27,196 @@
         "go": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["version_file"],
+          "required": [
+            "version_file"
+          ],
           "properties": {
-            "version_file": { "type": "string", "default": "go.mod" }
+            "version_file": {
+              "type": "string",
+              "default": "go.mod"
+            }
           }
         },
         "node": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["version_file"],
+          "required": [
+            "version_file"
+          ],
           "properties": {
-            "version_file": { "type": "string", "examples": [".nvmrc", ".node-version", "package.json"] },
-            "package_manager": { "enum": ["npm", "pnpm", "yarn"], "default": "npm" }
+            "version_file": {
+              "type": "string",
+              "examples": [
+                ".nvmrc",
+                ".node-version",
+                "package.json"
+              ]
+            },
+            "package_manager": {
+              "enum": [
+                "npm",
+                "pnpm",
+                "yarn"
+              ],
+              "default": "npm"
+            }
           }
         },
         "python": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["version_file"],
+          "required": [
+            "version_file"
+          ],
           "properties": {
-            "version_file": { "type": "string", "examples": [".python-version", "pyproject.toml"] }
+            "version_file": {
+              "type": "string",
+              "examples": [
+                ".python-version",
+                "pyproject.toml"
+              ]
+            }
           }
         }
       }
     },
-    "install": {
-      "type": "string",
-      "description": "Installs dependencies once the toolchain is set up. Runs in CI before the agent starts and in fresh cloud sessions. Empty or absent: nothing to install.",
-      "examples": ["go mod download", "pnpm install --frozen-lockfile", "uv sync --frozen"]
+    "commands": {
+      "type": "object",
+      "description": "Your project's commands, named by purpose. Workflows and agents pick the one they need by name; every one except install is also allowed for agents.",
+      "additionalProperties": false,
+      "required": [
+        "check"
+      ],
+      "properties": {
+        "install": {
+          "type": "string",
+          "description": "Installs dependencies once the toolchain is set up. Runs in CI before the agent starts and in fresh cloud sessions. Never granted to agents.",
+          "examples": [
+            "go mod download",
+            "pnpm install --frozen-lockfile",
+            "uv sync --frozen"
+          ]
+        },
+        "format": {
+          "description": "Rewrites files into the project's format. Agents run it before `check`.",
+          "$ref": "#/$defs/command",
+          "examples": [
+            "make fmt",
+            "pnpm prettier --write .",
+            "uv run ruff format"
+          ]
+        },
+        "lint": {
+          "description": "Runs the linter.",
+          "$ref": "#/$defs/command",
+          "examples": [
+            "make vet",
+            "pnpm lint",
+            "uv run ruff check"
+          ]
+        },
+        "typecheck": {
+          "description": "Runs the type checker.",
+          "$ref": "#/$defs/command",
+          "examples": [
+            "pnpm tsc --noEmit",
+            "uv run mypy ."
+          ]
+        },
+        "test": {
+          "description": "Runs the test suite. Agents use it to iterate on a fix.",
+          "$ref": "#/$defs/command",
+          "examples": [
+            "make test",
+            "pnpm test",
+            "uv run pytest"
+          ]
+        },
+        "build": {
+          "description": "Compiles or bundles the project.",
+          "$ref": "#/$defs/command",
+          "examples": [
+            "make build",
+            "pnpm build"
+          ]
+        },
+        "check": {
+          "description": "The gate: CI runs it on every PR and agents must pass it before pushing. One command, or a list run in order.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/command"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/command"
+              }
+            }
+          ],
+          "examples": [
+            "make check",
+            [
+              "pnpm lint",
+              "pnpm typecheck",
+              "pnpm test"
+            ]
+          ]
+        }
+      }
     },
-    "checks": {
+    "allow": {
       "type": "array",
-      "minItems": 1,
-      "description": "The mechanical checks, in order. pr-checks.yml runs each one; agents must pass all of them before pushing.",
-      "items": { "$ref": "#/$defs/command" }
-    },
-    "agent_commands": {
-      "type": "array",
-      "description": "Extra commands agents may run in CI, beyond `checks` and git. Anything not listed here or in `checks` is denied in a headless run.",
-      "items": { "$ref": "#/$defs/command" }
+      "description": "Extra permission patterns for agents, beyond the named commands and git. A trailing `:*` allows any arguments. Anything not named or listed is denied in a headless run.",
+      "items": {
+        "$ref": "#/$defs/command"
+      }
     },
     "dependency_files": {
       "type": "array",
       "description": "Manifests and lockfiles. The fix agent may only change them when the bug is in a dependency.",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "protected_paths": {
       "type": "array",
       "description": "Path prefixes an unattended agent may never change, on top of .github/, .claude/ and .env* which are always protected. The fix workflow refuses to open a PR that touches one.",
-      "items": { "type": "string", "minLength": 1 },
-      "examples": [["migrations/", "infra/"]]
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "examples": [
+        [
+          "migrations/",
+          "infra/"
+        ]
+      ]
     },
     "image": {
       "type": "object",
       "description": "Container build for build-image.yml. Omit it, and delete that workflow, if you do not ship an image.",
       "additionalProperties": false,
-      "required": ["inputs"],
+      "required": [
+        "inputs"
+      ],
       "properties": {
         "inputs": {
           "type": "array",
           "minItems": 1,
           "description": "git pathspecs for everything that ends up in the image. Their content hash decides whether a build is needed; `:!:` excludes.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "context": { "type": "string", "default": "." },
-        "dockerfile": { "type": "string", "default": "Dockerfile" }
+        "context": {
+          "type": "string",
+          "default": "."
+        },
+        "dockerfile": {
+          "type": "string",
+          "default": "Dockerfile"
+        }
       }
     }
   }
