@@ -48,12 +48,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      # On a PR the checkout above is the PR's merge ref, so its copy of the
+      # setup action is PR code. Run the default branch's copy instead, so a PR
+      # cannot change what the setup step itself does. (Its install and the
+      # agent's checks still run the PR's code, as any CI on the PR does.)
+      - name: Check out trusted setup action
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: .agent-ci-trusted
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - name: Keep the trusted copy out of the agent's commits
+        run: echo '/.agent-ci-trusted/' >> .git/info/exclude
+
       # Your toolchain and dependencies, from .claude/agent-ci.json. The config
-      # is read from the default branch, so a PR cannot widen the command
+      # is read from the default branch too, so a PR cannot widen the command
       # allowlist the agent runs it under.
       - name: Project setup
         id: project
-        uses: ./.github/actions/project-setup
+        uses: ./.agent-ci-trusted/.github/actions/project-setup
         with:
           config-ref: origin/${{ github.event.repository.default_branch }}
 

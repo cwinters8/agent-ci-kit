@@ -57,6 +57,9 @@ jobs:
         uses: ./.github/actions/project-setup
         with:
           config-ref: origin/${{ github.event.repository.default_branch }}
+          # The sweep checks out each PR, whose dependencies can differ from
+          # the default branch's, so the agent may rerun `commands.install`.
+          grant-install: 'true'
 
       - name: Run review sweep
         uses: anthropics/claude-code-action@v1
@@ -67,6 +70,9 @@ jobs:
             Run the review-sweep skill in .claude/skills/review-sweep/ on ${{ github.repository }}
             ${{ github.event.inputs.pr && format('for PR #{0} only', github.event.inputs.pr) || 'across every open PR' }}.
             Use the gh CLI for GitHub reads and writes.
+            After checking out a PR whose diff touches a file listed in
+            `dependency_files` in .claude/agent-ci.json, run `commands.install`
+            from that file before any checks.
           claude_args: >-
             --model ${{ vars.AGENT_SWEEP_MODEL || 'sonnet' }}
             --max-turns ${{ vars.AGENT_MAX_TURNS_SWEEP || '60' }}

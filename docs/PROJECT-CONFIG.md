@@ -26,7 +26,7 @@ required.
 
 | Name | Who runs it | When |
 | --- | --- | --- |
-| `install` | `project-setup` action, `session-start.sh` | Once, after the toolchain, before the agent starts. Never granted to agents. |
+| `install` | `project-setup` action, `session-start.sh`, review sweep | Once, after the toolchain, before the agent starts. Granted only to the review sweep, which checks out other PRs and reinstalls when one changes a dependency file. |
 | `format` | agents | Before `check`, so formatting never fails the gate. |
 | `lint` | agents | To check one concern without the full gate. |
 | `typecheck` | agents | Same. |
@@ -40,16 +40,19 @@ never list a command twice.
 Commands are single commands: no quotes, `&&`, pipes or `$`. They become
 Claude Code permission rules, and the setup action rejects anything that could
 chain a second command. Put a multi-step command behind a Makefile target or a
-package script. `install` is the exception: it runs as a shell command and is
-never granted to agents.
+package script. `install` may use shell operators (`pip install uv && uv sync`),
+but then the review sweep cannot rerun it; give it one plain command if your
+PRs change dependencies.
 
 ## Trust
 
 Agent workflows read the config from the default branch, not from the branch
 they are working on. A PR (or the agent itself) that edits the config cannot
 widen its own allowlist or unprotect a path; the change applies after it is
-reviewed and merged. `pr-checks.yml` reads the PR's own copy, so a toolchain
-change is tested by the PR that makes it.
+reviewed and merged. `claude.yml`, which runs on PRs, also takes the setup
+action itself from the default branch, so a PR cannot change what the setup
+step does. `pr-checks.yml` reads the PR's own copy, so a toolchain change is
+tested by the PR that makes it.
 
 ## Not in the config
 

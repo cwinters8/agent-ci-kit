@@ -192,7 +192,9 @@ jobs:
 
           pattern='^(\.github/|\.claude/)|(^|/)\.env'
           [ -z "$EXTRA" ] || pattern="$pattern|$EXTRA"
-          protected="$(git diff --name-only "origin/$BASE...origin/$BRANCH" \
+          # --no-renames lists both sides of a move, so moving a file out of a
+          # protected path is caught too.
+          protected="$(git diff --no-renames --name-only "origin/$BASE...origin/$BRANCH" \
             | grep -E "$pattern" || true)"
           if [ -n "$protected" ]; then
             echo "blocked=true" >> "$GITHUB_OUTPUT"

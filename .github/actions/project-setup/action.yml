@@ -19,13 +19,17 @@ inputs:
     description: Run `commands.install` after the toolchain is set up.
     required: false
     default: 'true'
+  grant-install:
+    description: Add `commands.install` to allowed-bash, for agents that check out other branches and must reinstall.
+    required: false
+    default: 'false'
 
 outputs:
   check:
     description: The `commands.check` gate, one command per line.
     value: ${{ steps.cfg.outputs.check }}
   allowed-bash:
-    description: 'Every named command except install, plus `allow`, as comma-separated Bash(...) entries for --allowedTools.'
+    description: 'Every named command except install (unless grant-install), plus `allow`, as comma-separated Bash(...) entries for --allowedTools.'
     value: ${{ steps.cfg.outputs.allowed-bash }}
   protected-pattern:
     description: ERE matching `protected_paths`; empty when there are none.
@@ -42,6 +46,7 @@ runs:
       shell: bash
       env:
         CONFIG_REF: ${{ inputs.config-ref }}
+        GRANT_INSTALL: ${{ inputs.grant-install }}
       run: |
         set -euo pipefail
         file=.claude/agent-ci.json
@@ -79,6 +84,15 @@ runs:
         fi
 
         q() { jq -r "$lib $1" <<< "$cfg"; }
+        granted='granted'
+        if [ "$GRANT_INSTALL" = "true" ]; then
+          install_ok="$(q '.commands.install // "" | if . == "" then "none" elif cmd then "yes" else "no" end')"
+          if [ "$install_ok" = "yes" ]; then
+            granted='granted + [.commands.install]'
+          elif [ "$install_ok" = "no" ]; then
+            echo "::warning file=$file::commands.install is not a single plain command, so agents cannot rerun it. Wrap it in a script or Makefile target."
+          fi
+        fi
         delim="EOF_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
         {
           echo "go=$(q '.toolchain.go != null')"
@@ -89,7 +103,7 @@ runs:
           echo "python=$(q '.toolchain.python != null')"
           echo "python-version-file=$(q '.toolchain.python.version_file // ""')"
           echo "dependency-files=$(q '(.dependency_files // []) | join(" ")')"
-          echo "allowed-bash=$(q 'granted | reduce .[] as $c ([]; if index([$c]) then . else . + [$c] end) | map("Bash(\(.))") | join(",")')"
+          echo "allowed-bash=$(q "$granted"' | reduce .[] as $c ([]; if index([$c]) then . else . + [$c] end) | map("Bash(\(.))") | join(",")')"
           pattern="$(q '(.protected_paths // [])[]' | sed -e 's/[][\.*^$+?(){}|]/\\&/g' | paste -sd'|' -)"
           echo "protected-pattern=${pattern:+^($pattern)}"
           echo "install<<$delim"; q '.commands.install // ""'; echo "$delim"
@@ -108,12 +122,15 @@ runs:
       with:
         node-version-file: ${{ steps.cfg.outputs.node-version-file }}
 
-    # pnpm and yarn ship with Node behind corepack; this puts the version your
-    # package.json `packageManager` field pins on PATH.
+    # pnpm and yarn come through corepack, which puts the version your
+    # package.json `packageManager` field pins on PATH. Node bundles corepack
+    # only up to 24; install it on newer majors.
     - name: Enable corepack
       if: steps.cfg.outputs.node == 'true' && steps.cfg.outputs.node-package-manager != 'npm'
       shell: bash
-      run: corepack enable
+      run: |
+        command -v corepack > /dev/null || npm install -g corepack
+        corepack enable
 
     - name: Set up Python
       if: steps.cfg.outputs.python == 'true'
@@ -126,4 +143,8 @@ runs:
       shell: bash
       env:
         INSTALL: ${{ steps.cfg.outputs.install }}
-      run: bash -euo pipefail -c "$INSTALL"
+      # The flag tells .claude/hooks/session-start.sh not to install again
+      # when the agent's session starts in this job.
+      run: |
+        bash -euo pipefail -c "$INSTALL"
+        echo "AGENT_CI_INSTALLED=true" >> "$GITHUB_ENV"

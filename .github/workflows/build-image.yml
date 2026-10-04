@@ -62,14 +62,18 @@ jobs:
             echo "::error file=$cfg::No image.inputs. Add them, or delete this workflow if you do not ship an image."
             exit 1
           fi
-          hash="$( { git ls-files -z -- "${inputs[@]}" \
-            | sort -z | xargs -0 sha256sum; } | sha256sum | cut -c1-16)"
+          context="$(jq -r '.image.context // "."' "$cfg")"
+          dockerfile="$(jq -r '.image.dockerfile // "Dockerfile"' "$cfg")"
+          # The build settings are part of the hash: pointing at another
+          # context or Dockerfile must build, not retag the old image.
+          hash="$( { git ls-files -z -- "${inputs[@]}" | sort -z | xargs -0 sha256sum
+            printf 'context=%s\ndockerfile=%s\n' "$context" "$dockerfile"; } | sha256sum | cut -c1-16)"
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           {
             echo "hash=$hash"
             echo "image=$image"
-            echo "context=$(jq -r '.image.context // "."' "$cfg")"
-            echo "dockerfile=$(jq -r '.image.dockerfile // "Dockerfile"' "$cfg")"
+            echo "context=$context"
+            echo "dockerfile=$dockerfile"
           } >> "$GITHUB_OUTPUT"
           echo "Image inputs hash: $hash"
 
