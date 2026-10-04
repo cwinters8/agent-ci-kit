@@ -10,7 +10,7 @@ by asking the model nicely.
 | Review bots cannot spend at will | `claude-review-respond.yml` starts only for maintainers and bots in `AGENT_REVIEW_BOTS`, only on agent branches, and never for `claude[bot]`, so the agent's own replies cannot loop |
 | Large diffs are flagged | diffs over `AGENT_MAX_DIFF_LINES` get `agent:large-diff` |
 | Agent cannot browse the web | `--disallowedTools WebFetch,WebSearch` (blocks prompt injection from fetched pages and data exfiltration by URL) |
-| Agent can only run listed commands | `--allowedTools` allowlist built from the named `commands` (never `install`) and `allow`, read from the default branch so a PR cannot widen it; anything else is denied in a headless run |
+| Agent can only run listed commands | `--allowedTools` allowlist built from the named `commands` and `allow`, read from the default branch so a PR cannot widen it; anything else is denied in a headless run |
 | Agent never merges or pushes to main | no merge tool granted; branch protection on main (set this up) |
 | PRs open as drafts | `gh pr create --draft` in the workflow |
 | Credentials are step-scoped | secrets passed to the action step only, never a job-level `env:` |
@@ -27,3 +27,7 @@ installed. On a public repo:
   and unlisted bots.
 - Never point agent workflows at a self-hosted runner (see `vps/README.md`).
 - Turn on branch protection requiring review on the default branch.
+- Only `@claude` on PRs whose authors you trust. The run installs the PR's
+  dependencies and runs its checks, so the PR's own code (install hooks,
+  tests, Makefile) executes in a job that can push. On a private repo every
+  PR author already has write access; on a public one, a fork PR does not.

@@ -25,7 +25,7 @@ outputs:
     description: The `commands.check` gate, one command per line.
     value: ${{ steps.cfg.outputs.check }}
   allowed-bash:
-    description: 'Every named command except install, plus `allow`, as comma-separated Bash(...) entries for --allowedTools.'
+    description: 'Every named command, plus `allow`, as comma-separated Bash(...) entries for --allowedTools. Install is left out when it is not one plain command.'
     value: ${{ steps.cfg.outputs.allowed-bash }}
   protected-pattern:
     description: ERE matching `protected_paths`; empty when there are none.
@@ -56,7 +56,7 @@ runs:
           exit 1
         fi
 
-        # Named commands (except install) and `allow` land inside
+        # Named commands and `allow` land inside
         # --allowedTools "...", so anything that could break out of that
         # string or chain a second command is rejected.
         lib='
@@ -64,11 +64,36 @@ runs:
           def list: if type == "array" then .[] else . end;
           def check: [.commands.check // empty | list];
           def granted: [.commands // {} | to_entries[] | select(.key != "install") | .value | list] + (.allow // []);
-          def cmd: type == "string" and test("^[A-Za-z0-9 ._:/*=@+-]+$");'
+          def cmd: type == "string" and test("^[A-Za-z0-9 ._:/*=@+-]+$");
+          def unknown($at; $known): (. // {}) | keys[] | select(. as $k | $known | index([$k]) | not)
+            | "\($at)\(.): unknown field; expected one of \($known | join(", "))";'
         errors="$(jq -r "$lib"'
           [
+            (if (.toolchain | type) != "object" then "toolchain: required; {} if the runner image already has what you need" else empty end),
             (if (.commands | type) != "object" then "commands: required" else empty end),
-            (.commands // {} | keys[] | select(. as $k | roles | index([$k]) | not) | "commands.\(.): unknown; use one of \(roles | join(", "))"),
+            # A misspelled field would otherwise be ignored silently, e.g. a
+            # protected path dropping out of the guardrail.
+            unknown(""; ["$schema", "toolchain", "commands", "allow", "dependency_files", "protected_paths", "image"]),
+            (.toolchain | unknown("toolchain."; ["go", "node", "python"])),
+            (.toolchain.go | unknown("toolchain.go."; ["version_file"])),
+            (.toolchain.node | unknown("toolchain.node."; ["version_file", "package_manager"])),
+            (.toolchain.python | unknown("toolchain.python."; ["version_file"])),
+            (.toolchain.node.package_manager // "npm" | select(IN("npm", "pnpm", "yarn") | not) | "toolchain.node.package_manager: \(tojson) is not npm, pnpm or yarn"),
+            # An empty version file makes setup-* fall back to whatever runtime
+            # is on PATH, so a check could pass on an unpinned version.
+            (.toolchain // {} | to_entries[] | select(.value | type != "object" or (.version_file | type != "string" or length == 0))
+              | "toolchain.\(.key).version_file: required, the file that pins the version"),
+            (.commands | unknown("commands."; roles)),
+            (.image | unknown("image."; ["inputs", "context", "dockerfile"])),
+            # build-image.yml only runs after merge, so catch a broken image
+            # block here, on the PR that introduces it.
+            (if .image == null then empty
+             elif (.image | type) != "object" then "image: must be an object"
+             elif (.image.inputs | type) != "array" or (.image.inputs | length) == 0 or any(.image.inputs[]; type != "string" or length == 0)
+               then "image.inputs: required, a non-empty list of git pathspecs"
+             else (.image | (.context, .dockerfile) | select(. != null and (type != "string" or length == 0))
+               | "image.context and image.dockerfile must be non-empty strings")
+             end),
             (if (check | length) == 0 then "commands.check: required, the gate CI and agents run before pushing" else empty end),
             (granted[] | select(cmd | not) | "command not allowed (use one plain command, no quotes or shell operators): \(tojson)"),
             ((.protected_paths // [])[] | select(type != "string" or length == 0) | "protected_paths: entries must be non-empty strings")
@@ -79,17 +104,26 @@ runs:
         fi
 
         q() { jq -r "$lib $1" <<< "$cfg"; }
+        # Agents rerun install after changing a dependency file or checking
+        # out another PR, so it is granted too when it is one plain command.
+        granted='granted'
+        install_ok="$(q '.commands.install // "" | if . == "" then "none" elif cmd then "yes" else "no" end')"
+        if [ "$install_ok" = "yes" ]; then
+          granted='granted + [.commands.install]'
+        elif [ "$install_ok" = "no" ]; then
+          echo "::warning file=$file::commands.install is not a single plain command, so agents cannot rerun it. Wrap it in a script or Makefile target."
+        fi
         delim="EOF_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
         {
           echo "go=$(q '.toolchain.go != null')"
-          echo "go-version-file=$(q '.toolchain.go.version_file // "go.mod"')"
+          echo "go-version-file=$(q '.toolchain.go.version_file // ""')"
           echo "node=$(q '.toolchain.node != null')"
           echo "node-version-file=$(q '.toolchain.node.version_file // ""')"
           echo "node-package-manager=$(q '.toolchain.node.package_manager // "npm"')"
           echo "python=$(q '.toolchain.python != null')"
           echo "python-version-file=$(q '.toolchain.python.version_file // ""')"
           echo "dependency-files=$(q '(.dependency_files // []) | join(" ")')"
-          echo "allowed-bash=$(q 'granted | reduce .[] as $c ([]; if index([$c]) then . else . + [$c] end) | map("Bash(\(.))") | join(",")')"
+          echo "allowed-bash=$(q "$granted"' | reduce .[] as $c ([]; if index([$c]) then . else . + [$c] end) | map("Bash(\(.))") | join(",")')"
           pattern="$(q '(.protected_paths // [])[]' | sed -e 's/[][\.*^$+?(){}|]/\\&/g' | paste -sd'|' -)"
           echo "protected-pattern=${pattern:+^($pattern)}"
           echo "install<<$delim"; q '.commands.install // ""'; echo "$delim"
@@ -108,12 +142,15 @@ runs:
       with:
         node-version-file: ${{ steps.cfg.outputs.node-version-file }}
 
-    # pnpm and yarn ship with Node behind corepack; this puts the version your
-    # package.json `packageManager` field pins on PATH.
+    # pnpm and yarn come through corepack, which puts the version your
+    # package.json `packageManager` field pins on PATH. Node bundles corepack
+    # only up to 24; install it on newer majors.
     - name: Enable corepack
       if: steps.cfg.outputs.node == 'true' && steps.cfg.outputs.node-package-manager != 'npm'
       shell: bash
-      run: corepack enable
+      run: |
+        command -v corepack > /dev/null || npm install -g corepack
+        corepack enable
 
     - name: Set up Python
       if: steps.cfg.outputs.python == 'true'
@@ -126,4 +163,8 @@ runs:
       shell: bash
       env:
         INSTALL: ${{ steps.cfg.outputs.install }}
-      run: bash -euo pipefail -c "$INSTALL"
+      # The flag tells .claude/hooks/session-start.sh not to install again
+      # when the agent's session starts in this job.
+      run: |
+        bash -euo pipefail -c "$INSTALL"
+        echo "AGENT_CI_INSTALLED=true" >> "$GITHUB_ENV"
