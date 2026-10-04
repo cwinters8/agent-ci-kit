@@ -64,6 +64,11 @@ git fetch origin "$default"
 git switch -c claude/agent-ci-kit-setup "origin/$default"
 ```
 
+If `claude/agent-ci-kit-setup` already exists, an earlier run stopped partway:
+`git switch claude/agent-ci-kit-setup` instead and carry on. The kit files on it
+are that run's draft, not the user's, so finish and correct them rather than
+treating them as files to merge into.
+
 ## 2. Survey the repo
 
 No questions yet. Work out, and note the file that told you each answer:

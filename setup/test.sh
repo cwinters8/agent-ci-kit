@@ -121,7 +121,7 @@ cp "$kit/.github/workflows/pr-checks.yml" "$dir/.github/workflows/"
 git -C "$dir" add -A
 out="$(run_doctor "$dir")"
 expect "doctor: flags Go-only filters in a Go and Node repo" "$out" \
-  "+pr-checks.yml paths: filter matches none of your node files" "-matches none of your go files"
+  "+pr-checks.yml paths: filter misses 1 of your node files (e.g. src/x.js)" "-of your go files"
 
 printf "    paths:\n      - '**.go'\n      - go.mod\n      - package.json\n" > "$dir/filters"
 sed -e '/^    paths:/,/^[^ ]/{/^    paths:/r '"$dir/filters"'
@@ -129,7 +129,25 @@ sed -e '/^    paths:/,/^[^ ]/{/^    paths:/r '"$dir/filters"'
 rm "$dir/filters"
 out="$(run_doctor "$dir")"
 expect "doctor: a manifest alone does not count as covering a stack's sources" "$out" \
-  "+pr-checks.yml paths: filter matches none of your node files"
+  "+pr-checks.yml paths: filter misses 1 of your node files"
+
+dir="$(node_repo uncovered-dir)"
+mkdir -p "$dir/scripts" && echo 'console.log(1)' > "$dir/scripts/build.js"
+git -C "$dir" add -A
+out="$(run_doctor "$dir")"
+expect "doctor: every source directory must be covered, not just one" "$out" \
+  "+pr-checks.yml paths: filter misses 1 of your node files (e.g. scripts/build.js)"
+
+dir="$(node_repo image-inputs)"
+mkdir -p "$dir/assets" && echo logo > "$dir/assets/logo.txt"
+printf 'FROM scratch\nCOPY src assets /\n' > "$dir/Dockerfile"
+jq '.image = {"inputs": ["src", "assets", "Dockerfile"]}' "$dir/.claude/agent-ci.json" > "$dir/cfg" && mv "$dir/cfg" "$dir/.claude/agent-ci.json"
+sed -e "s#- '\*\*\.go'#- 'src/**'#" -e '/- go\.mod/d' -e '/- go\.sum/d' \
+  "$kit/.github/workflows/build-image.yml" > "$dir/.github/workflows/build-image.yml"
+git -C "$dir" add -A
+out="$(run_doctor "$dir")"
+expect "doctor: build-image.yml must fire for every image input" "$out" \
+  "+build-image.yml paths: filter misses 1 of your image input files (e.g. assets/logo.txt)" "-src/x.js"
 
 dir="$(kit_repo big-go)"
 for i in $(seq 1 4000); do echo "package p" > "$dir/file_with_a_long_enough_name_$i.go"; done

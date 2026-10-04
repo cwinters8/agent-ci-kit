@@ -183,18 +183,37 @@ for w in pr-checks build-image; do
     fail "$f paths: filter still lists the sample's Go files; point it at your source"; leftover=1
   fi
 done
-# pr-checks.yml must fire for a change in any configured stack's sources.
-if [ -f .github/workflows/pr-checks.yml ] && [ -f "$cfg" ]; then
-  re=""
+# Reads file paths on stdin; prints those a workflow's `paths:` filter would not
+# trigger on: matched by no pattern, or excluded by a `!` pattern.
+untriggered() {
+  local pos="" neg="" g r files
   while IFS= read -r g; do
-    [ -n "$g" ] && [ "${g#!}" = "$g" ] && r="$(glob_re "$g")" && [ -n "$r" ] && re="${re:+$re|}($r)"
-  done < <(path_filters .github/workflows/pr-checks.yml)
-  for stack in $(jq -r '.toolchain // {} | keys[]' "$cfg" 2> /dev/null); do
-    files="$(stack_files "$stack")"
-    [ -n "$files" ] || continue
-    if [ -z "$re" ] || ! grep -qE "$re" <<< "$files"; then
-      fail "pr-checks.yml paths: filter matches none of your $stack files (e.g. $(head -n 1 <<< "$files")); changes there would skip the checks"; leftover=1
+    [ -n "$g" ] || continue
+    if [ "${g#!}" != "$g" ]; then
+      r="$(glob_re "${g#!}")" && [ -n "$r" ] && neg="${neg:+$neg|}($r)"
+    else
+      r="$(glob_re "$g")" && [ -n "$r" ] && pos="${pos:+$pos|}($r)"
     fi
+  done < <(path_filters "$1")
+  files="$(cat)"
+  [ -n "$files" ] || return 0
+  {
+    if [ -n "$pos" ]; then grep -vE "$pos" <<< "$files" || true; else printf '%s\n' "$files"; fi
+    if [ -n "$neg" ]; then grep -E "$neg" <<< "$files" || true; fi
+  } | sort -u
+}
+# Fails when a workflow's filter would skip a change to any of the given files.
+check_triggers() {
+  local missed
+  missed="$(untriggered ".github/workflows/$1.yml" <<< "$3")"
+  [ -n "$missed" ] || return 0
+  fail "$1.yml paths: filter misses $(grep -c . <<< "$missed") of your $2 (e.g. $(head -n 1 <<< "$missed")); a change there would not run it"
+  leftover=1
+}
+# pr-checks.yml must run for a change to any source file of a configured stack.
+if [ -f .github/workflows/pr-checks.yml ] && [ -f "$cfg" ]; then
+  for stack in $(jq -r '.toolchain // {} | keys[]' "$cfg" 2> /dev/null); do
+    check_triggers pr-checks "$stack files" "$(stack_files "$stack")"
   done
 fi
 if [ -f .github/workflows/build-image.yml ]; then
@@ -203,6 +222,13 @@ if [ -f .github/workflows/build-image.yml ]; then
     fail "build-image.yml is present but $dockerfile is not; delete the workflow if you ship no image"; leftover=1
   elif [ -f "$cfg" ] && ! jq -e '.image' "$cfg" > /dev/null 2>&1; then
     fail "build-image.yml is present but $cfg has no image section"; leftover=1
+  else
+    # build-image.yml must run for a change to anything that goes into the image.
+    inputs=()
+    while IFS= read -r i; do [ -n "$i" ] && inputs+=("$i"); done < <(jq -r '.image.inputs // [] | .[]' "$cfg" 2> /dev/null)
+    if [ "${#inputs[@]}" -gt 0 ]; then
+      check_triggers build-image "image input files" "$(git ls-files -- "${inputs[@]}" 2> /dev/null || true)"
+    fi
   fi
 fi
 [ "$leftover" = 0 ] && ok "nothing left over from the sample project"
