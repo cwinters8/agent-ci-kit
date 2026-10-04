@@ -69,11 +69,23 @@ runs:
           def list: if type == "array" then .[] else . end;
           def check: [.commands.check // empty | list];
           def granted: [.commands // {} | to_entries[] | select(.key != "install") | .value | list] + (.allow // []);
-          def cmd: type == "string" and test("^[A-Za-z0-9 ._:/*=@+-]+$");'
+          def cmd: type == "string" and test("^[A-Za-z0-9 ._:/*=@+-]+$");
+          def unknown($at; $known): (. // {}) | keys[] | select(. as $k | $known | index([$k]) | not)
+            | "\($at)\(.): unknown field; expected one of \($known | join(", "))";'
         errors="$(jq -r "$lib"'
           [
+            (if (.toolchain | type) != "object" then "toolchain: required; {} if the runner image already has what you need" else empty end),
             (if (.commands | type) != "object" then "commands: required" else empty end),
-            (.commands // {} | keys[] | select(. as $k | roles | index([$k]) | not) | "commands.\(.): unknown; use one of \(roles | join(", "))"),
+            # A misspelled field would otherwise be ignored silently, e.g. a
+            # protected path dropping out of the guardrail.
+            unknown(""; ["$schema", "toolchain", "commands", "allow", "dependency_files", "protected_paths", "image"]),
+            (.toolchain | unknown("toolchain."; ["go", "node", "python"])),
+            (.toolchain.go | unknown("toolchain.go."; ["version_file"])),
+            (.toolchain.node | unknown("toolchain.node."; ["version_file", "package_manager"])),
+            (.toolchain.python | unknown("toolchain.python."; ["version_file"])),
+            (.toolchain.node.package_manager // "npm" | select(IN("npm", "pnpm", "yarn") | not) | "toolchain.node.package_manager: \(tojson) is not npm, pnpm or yarn"),
+            (.commands | unknown("commands."; roles)),
+            (.image | unknown("image."; ["inputs", "context", "dockerfile"])),
             (if (check | length) == 0 then "commands.check: required, the gate CI and agents run before pushing" else empty end),
             (granted[] | select(cmd | not) | "command not allowed (use one plain command, no quotes or shell operators): \(tojson)"),
             ((.protected_paths // [])[] | select(type != "string" or length == 0) | "protected_paths: entries must be non-empty strings")

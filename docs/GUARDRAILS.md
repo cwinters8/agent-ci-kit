@@ -24,3 +24,7 @@ installed. On a public repo:
   maintainers: it reads review text from anyone and can push.
 - Never point agent workflows at a self-hosted runner (see `vps/README.md`).
 - Turn on branch protection requiring review on the default branch.
+- Only `@claude` on PRs whose authors you trust. The run installs the PR's
+  dependencies and runs its checks, so the PR's own code (install hooks,
+  tests, Makefile) executes in a job that can push. On a private repo every
+  PR author already has write access; on a public one, a fork PR does not.

@@ -26,7 +26,7 @@ required.
 
 | Name | Who runs it | When |
 | --- | --- | --- |
-| `install` | `project-setup` action, `session-start.sh`, review sweep | Once, after the toolchain, before the agent starts. Granted only to the review sweep, which checks out other PRs and reinstalls when one changes a dependency file. |
+| `install` | `project-setup` action, `session-start.sh`, review sweep | Once, after the toolchain, before the agent starts. Granted only to the review sweep, which reinstalls after checking out each PR. |
 | `format` | agents | Before `check`, so formatting never fails the gate. |
 | `lint` | agents | To check one concern without the full gate. |
 | `typecheck` | agents | Same. |
