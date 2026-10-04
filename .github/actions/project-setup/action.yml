@@ -79,6 +79,10 @@ runs:
             (.toolchain.node | unknown("toolchain.node."; ["version_file", "package_manager"])),
             (.toolchain.python | unknown("toolchain.python."; ["version_file"])),
             (.toolchain.node.package_manager // "npm" | select(IN("npm", "pnpm", "yarn") | not) | "toolchain.node.package_manager: \(tojson) is not npm, pnpm or yarn"),
+            # An empty version file makes setup-* fall back to whatever runtime
+            # is on PATH, so a check could pass on an unpinned version.
+            (.toolchain // {} | to_entries[] | select(.value | type != "object" or (.version_file | type != "string" or length == 0))
+              | "toolchain.\(.key).version_file: required, the file that pins the version"),
             (.commands | unknown("commands."; roles)),
             (.image | unknown("image."; ["inputs", "context", "dockerfile"])),
             # build-image.yml only runs after merge, so catch a broken image
@@ -112,7 +116,7 @@ runs:
         delim="EOF_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
         {
           echo "go=$(q '.toolchain.go != null')"
-          echo "go-version-file=$(q '.toolchain.go.version_file // "go.mod"')"
+          echo "go-version-file=$(q '.toolchain.go.version_file // ""')"
           echo "node=$(q '.toolchain.node != null')"
           echo "node-version-file=$(q '.toolchain.node.version_file // ""')"
           echo "node-package-manager=$(q '.toolchain.node.package_manager // "npm"')"
