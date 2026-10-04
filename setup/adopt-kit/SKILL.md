@@ -85,10 +85,12 @@ No questions yet. Work out, and note the file that told you each answer:
 - **Project basics** for AGENTS.md: what it is, layout, how to run it.
 
 Then prove the commands. Run `install` and every named command locally. A
-command that fails here fails in CI, so fix it or raise it. Each non-install
-command must be one plain command (the schema's `$defs.command.pattern`: no
+command that fails here fails in CI, so fix it or raise it. Each command
+must be one plain command (the schema's `$defs.command.pattern`: no
 quotes, `&&`, pipes or `$`). If the gate is a chain, add a Makefile target or
 package script that runs it, and say you did: that change goes in the setup PR.
+`install` may chain commands, but then agents cannot rerun it after changing a
+dependency, so prefer one plain command there too.
 
 ## 3. Interview
 

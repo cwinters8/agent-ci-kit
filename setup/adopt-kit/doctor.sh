@@ -70,30 +70,48 @@ if [ ! -f "$cfg" ]; then
 elif ! jq empty "$cfg" 2> /dev/null; then
   fail "$cfg is not valid JSON"
 else
-  # Command names and the allowed-character pattern come from the schema the
-  # workflows were built against, so this check cannot drift from it.
-  roles='["install","format","lint","typecheck","test","build","check"]'
-  pattern='^[A-Za-z0-9 ._:/*=@+-]+$'
-  if [ -f "$schema" ] && jq empty "$schema" 2> /dev/null; then
-    roles="$(jq -c '.properties.commands.properties | keys' "$schema")"
-    pattern="$(jq -r '."$defs".command.pattern' "$schema")"
-  fi
-  errors="$(jq -r --argjson roles "$roles" --arg pat "$pattern" '
+  # Mirrors the validation in .github/actions/project-setup/action.yml, so a
+  # config that passes here also passes the setup step in CI. Keep them in step.
+  errors="$(jq -r '
+    def roles: ["install", "format", "lint", "typecheck", "test", "build", "check"];
     def list: if type == "array" then .[] else . end;
+    def check: [.commands.check // empty | list];
+    def granted: [.commands // {} | to_entries[] | select(.key != "install") | .value | list] + (.allow // []);
+    def cmd: type == "string" and test("^[A-Za-z0-9 ._:/*=@+-]+$");
+    def unknown($at; $known): (. // {}) | keys[] | select(. as $k | $known | index([$k]) | not)
+      | "\($at)\(.): unknown field; expected one of \($known | join(", "))";
     [
-      (if (.toolchain | type) != "object" then "toolchain: required (use {} if the runner already has your runtime)" else empty end),
-      (.toolchain // {} | keys[] | select(IN("go", "node", "python") | not) | "toolchain.\(.): not supported; use go, node, python or {}"),
+      (if (.toolchain | type) != "object" then "toolchain: required; {} if the runner image already has what you need" else empty end),
       (if (.commands | type) != "object" then "commands: required" else empty end),
-      (.commands // {} | keys[] | select(. as $k | $roles | index($k) | not) | "commands.\(.): unknown name; use one of \($roles | join(", "))"),
-      (if ([.commands.check // empty | list] | length) == 0 then "commands.check: required" else empty end),
-      (([.commands // {} | to_entries[] | select(.key != "install") | .value | list] + (.allow // []))[]
-        | select(type != "string" or (test($pat) | not))
-        | "not a plain command (no quotes or shell operators; wrap it in a Makefile target or package script): \(tojson)")
-    ] | .[]' "$cfg")"
+      unknown(""; ["$schema", "toolchain", "commands", "allow", "dependency_files", "protected_paths", "image"]),
+      (.toolchain | unknown("toolchain."; ["go", "node", "python"])),
+      (.toolchain.go | unknown("toolchain.go."; ["version_file"])),
+      (.toolchain.node | unknown("toolchain.node."; ["version_file", "package_manager"])),
+      (.toolchain.python | unknown("toolchain.python."; ["version_file"])),
+      (.toolchain.node.package_manager // "npm" | select(IN("npm", "pnpm", "yarn") | not) | "toolchain.node.package_manager: \(tojson) is not npm, pnpm or yarn"),
+      (.toolchain // {} | to_entries[] | select(.value | type != "object" or (.version_file | type != "string" or length == 0))
+        | "toolchain.\(.key).version_file: required, the file that pins the version"),
+      (.commands | unknown("commands."; roles)),
+      (.image | unknown("image."; ["inputs", "context", "dockerfile"])),
+      (if .image == null then empty
+       elif (.image | type) != "object" then "image: must be an object"
+       elif (.image.inputs | type) != "array" or (.image.inputs | length) == 0 or any(.image.inputs[]; type != "string" or length == 0)
+         then "image.inputs: required, a non-empty list of git pathspecs"
+       else (.image | (.context, .dockerfile) | select(. != null and (type != "string" or length == 0))
+         | "image.context and image.dockerfile must be non-empty strings")
+       end),
+      (if (check | length) == 0 then "commands.check: required, the gate CI and agents run before pushing" else empty end),
+      (granted[] | select(cmd | not) | "not one plain command (no quotes or shell operators; wrap it in a Makefile target or package script): \(tojson)"),
+      ((.protected_paths // [])[] | select(type != "string" or length == 0) | "protected_paths: entries must be non-empty strings")
+    ] | .[]' "$cfg" 2> /dev/null)" || errors="a field has the wrong type (see docs/PROJECT-CONFIG.md)"
   if [ -n "$errors" ]; then
     while IFS= read -r e; do fail "$e"; done <<< "$errors"
   else
     ok "fields and commands valid"
+  fi
+  install="$(jq -r '.commands.install // ""' "$cfg" 2> /dev/null)"
+  if [ -n "$install" ] && ! [[ "$install" =~ ^[A-Za-z0-9\ ._:/*=@+-]+$ ]]; then
+    warn "commands.install is not one plain command, so agents cannot rerun it after a dependency change"
   fi
 
   while IFS= read -r vf; do
