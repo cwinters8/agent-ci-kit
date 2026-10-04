@@ -43,9 +43,16 @@ The sample app (replace with yours)
 2. Install the Claude GitHub App: https://github.com/apps/claude
 3. Add repo secrets:
    - `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token`; uses your Pro/Max plan) **or** `ANTHROPIC_API_KEY` (API billing)
-   - `AGENT_PR_TOKEN`: fine-grained PAT, this repo only, Contents + Pull requests read/write. Without it, CI does not run on agent PRs.
+   - `AGENT_PR_TOKEN`: a fine-grained personal access token on your own account
+     (GitHub has no repo-owned tokens), limited to this repo only. Permissions:
+     Contents and Pull requests read/write; add Issues read/write and Actions
+     read-only if you use the daily review sweep. Without it, CI does not run on
+     agent PRs.
 4. Create labels: `agent:fix`, `agent:fix-opus`, `agent:needs-human`, `agent:large-diff`.
-5. Protect `main` (require a PR).
+5. Protect `main`: require a pull request, but **not** an approving review.
+   Agent PRs are opened with your PAT, so GitHub lists you as the author, and
+   you cannot approve your own PR. To keep required approvals, open PRs with a
+   GitHub App token or a second account instead.
 6. Open a bug with the "Bug for the agent" template and label it `agent:fix`.
 
 Locally: `make check` runs exactly what CI and the agents run. `make run`

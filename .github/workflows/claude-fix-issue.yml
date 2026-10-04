@@ -15,8 +15,11 @@
 #        CLAUDE_CODE_OAUTH_TOKEN  Pro/Max subscription (`claude setup-token`), or
 #        ANTHROPIC_API_KEY        pay-per-token API billing.
 #      And, strongly recommended:
-#        AGENT_PR_TOKEN  fine-grained PAT (this repo only; Contents + Pull
-#                        requests read/write). A PR opened with the default
+#        AGENT_PR_TOKEN  fine-grained PAT on your account, limited to this
+#                        repo (Contents + Pull requests read/write). PRs it
+#                        opens list you as author, so you cannot approve them
+#                        yourself; don't require approvals on main, or use a
+#                        GitHub App token instead. A PR opened with the default
 #                        GITHUB_TOKEN does not trigger your other workflows, so
 #                        without this your CI never runs on agent PRs. The Claude
 #                        App token cannot be used here: the action revokes it
