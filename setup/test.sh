@@ -121,13 +121,40 @@ cp "$kit/.github/workflows/pr-checks.yml" "$dir/.github/workflows/"
 git -C "$dir" add -A
 out="$(run_doctor "$dir")"
 expect "doctor: flags Go-only filters in a Go and Node repo" "$out" \
-  "+pr-checks.yml paths: filter covers only Go and kit files; add your node sources"
+  "+pr-checks.yml paths: filter matches none of your node files" "-matches none of your go files"
+
+printf "    paths:\n      - '**.go'\n      - go.mod\n      - package.json\n" > "$dir/filters"
+sed -e '/^    paths:/,/^[^ ]/{/^    paths:/r '"$dir/filters"'
+/^ *- /d;/^    paths:/d;}' "$kit/.github/workflows/pr-checks.yml" > "$dir/.github/workflows/pr-checks.yml"
+rm "$dir/filters"
+out="$(run_doctor "$dir")"
+expect "doctor: a manifest alone does not count as covering a stack's sources" "$out" \
+  "+pr-checks.yml paths: filter matches none of your node files"
+
+dir="$(kit_repo big-go)"
+for i in $(seq 1 4000); do echo "package p" > "$dir/file_with_a_long_enough_name_$i.go"; done
+git -C "$dir" add -A
+out="$(run_doctor "$dir")"
+expect "doctor: a large Go repo is not mistaken for one without Go files" "$out" \
+  "-has no Go files" "-filter still lists the sample's Go files"
+
+dir="$(node_repo store-layout)"
+printf '# Project profile\n\nHandlers call internal/store for persistence.\n' > "$dir/.claude/project-profile.md"
+out="$(run_doctor "$dir")"
+expect "doctor: a profile that mentions internal/store is not mistaken for the sample" "$out" \
+  "-.claude/project-profile.md still describes"
 
 dir="$(node_repo bad-types)"
 echo '{"toolchain": [], "commands": "x"}' > "$dir/.claude/agent-ci.json"
 out="$(run_doctor "$dir")"
 expect "doctor: a config with wrong types fails instead of passing" "$out" \
   "+✗ a field has the wrong type" "-✓ fields and commands valid"
+
+dir="$(node_repo install-number)"
+jq '.commands.install = 123' "$dir/.claude/agent-ci.json" > "$dir/cfg" && mv "$dir/cfg" "$dir/.claude/agent-ci.json"
+out="$(run_doctor "$dir")"
+expect "doctor: a non-string install command fails" "$out" \
+  "+✗ commands.install: must be a string" "-✓ fields and commands valid"
 
 dir="$(node_repo bad-fields)"
 cat > "$dir/.claude/agent-ci.json" << 'EOF'

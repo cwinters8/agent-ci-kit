@@ -98,6 +98,7 @@ else
       (.toolchain // {} | to_entries[] | select(.value | type != "object" or (.version_file | type != "string" or length == 0))
         | "toolchain.\(.key).version_file: required, the file that pins the version"),
       (.commands | unknown("commands."; roles)),
+      (.commands.install | select(. != null and type != "string") | "commands.install: must be a string"),
       (.image | unknown("image."; ["inputs", "context", "dockerfile"])),
       (if .image == null then empty
        elif (.image | type) != "object" then "image: must be an object"
@@ -115,7 +116,7 @@ else
   else
     ok "fields and commands valid"
   fi
-  install="$(jq -r '.commands.install // ""' "$cfg" 2> /dev/null)"
+  install="$(jq -r '.commands.install | if type == "string" then . else "" end' "$cfg" 2> /dev/null)"
   if [ -n "$install" ] && ! [[ "$install" =~ ^[A-Za-z0-9\ ._:/*=@+-]+$ ]]; then
     warn "commands.install is not one plain command, so agents cannot rerun it after a dependency change"
   fi
@@ -140,15 +141,33 @@ leftover=0
 if [ -f AGENTS.md ] && grep -qiE 'sample todo API|JSON todo API' AGENTS.md; then
   fail "AGENTS.md project sections still describe the kit's sample todo API"; leftover=1
 fi
-if [ -f .claude/project-profile.md ] && grep -qE 'internal/store|sample todo API' .claude/project-profile.md; then
+if [ -f .claude/project-profile.md ] && grep -q 'sample todo API' .claude/project-profile.md; then
   fail ".claude/project-profile.md still describes the kit's sample todo API"; leftover=1
 fi
 # Lists a workflow's `paths:` entries, one per line, without quotes.
 path_filters() {
   awk '/^ *paths:/ { on = 1; next } on && /^ *(#|$)/ { next } on && /^ *- / { sub(/^ *- */, ""); gsub(/["'"'"']/, ""); print; next } on { exit }' "$1"
 }
+# A GitHub `paths:` glob as an ERE: `**` spans directories, `*` and `?` stay
+# within one.
+glob_re() {
+  # shellcheck disable=SC2016 # the $ is a literal regex character
+  sed -e 's/[].+^$(){}|\\[]/\\&/g' -e 's#\*\*/#%DS%#g' -e 's#\*\*#%D%#g' \
+    -e 's#\*#[^/]*#g' -e 's#?#[^/]#g' -e 's#%DS%#(.*/)?#g' -e 's#%D%#.*#g' \
+    -e 's#^#^#' -e 's#$#$#' <<< "$1"
+}
+# Tracked source files per toolchain, captured whole: `git ls-files | grep -q`
+# would close the pipe early and trip pipefail on a large repo.
+stack_files() {
+  case "$1" in
+    go) git ls-files -- '*.go' ;;
+    node) git ls-files -- '*.js' '*.mjs' '*.cjs' '*.jsx' '*.ts' '*.mts' '*.cts' '*.tsx' '*.vue' '*.svelte' ;;
+    python) git ls-files -- '*.py' ;;
+  esac
+}
+go_files="$(stack_files go)"
 uses_go=1
-if ! git ls-files '*.go' | grep -q .; then
+if [ -z "$go_files" ]; then
   uses_go=0
   if [ -f "$cfg" ] && jq -e '.toolchain.go' "$cfg" > /dev/null 2>&1; then
     fail "$cfg sets up Go, but the repo has no Go files"; leftover=1
@@ -156,17 +175,28 @@ if ! git ls-files '*.go' | grep -q .; then
 elif [ -f "$cfg" ] && ! jq -e '.toolchain.go' "$cfg" > /dev/null 2>&1; then
   uses_go=0
 fi
-stacks="$(jq -r '.toolchain // {} | keys | map(select(. != "go")) | join(", ")' "$cfg" 2> /dev/null || true)"
 for w in pr-checks build-image; do
   f=".github/workflows/$w.yml"
   [ -f "$f" ] || continue
   filters="$(path_filters "$f")"
   if grep -qxF '**.go' <<< "$filters" && [ "$uses_go" = 0 ]; then
     fail "$f paths: filter still lists the sample's Go files; point it at your source"; leftover=1
-  elif [ -n "$stacks" ] && ! grep -vqE '\.go$|^go\.(mod|sum)$|^Makefile$|^Dockerfile$|^setup/|^\.claude/|^\.github/' <<< "$filters"; then
-    fail "$f paths: filter covers only Go and kit files; add your $stacks sources"; leftover=1
   fi
 done
+# pr-checks.yml must fire for a change in any configured stack's sources.
+if [ -f .github/workflows/pr-checks.yml ] && [ -f "$cfg" ]; then
+  re=""
+  while IFS= read -r g; do
+    [ -n "$g" ] && [ "${g#!}" = "$g" ] && r="$(glob_re "$g")" && [ -n "$r" ] && re="${re:+$re|}($r)"
+  done < <(path_filters .github/workflows/pr-checks.yml)
+  for stack in $(jq -r '.toolchain // {} | keys[]' "$cfg" 2> /dev/null); do
+    files="$(stack_files "$stack")"
+    [ -n "$files" ] || continue
+    if [ -z "$re" ] || ! grep -qE "$re" <<< "$files"; then
+      fail "pr-checks.yml paths: filter matches none of your $stack files (e.g. $(head -n 1 <<< "$files")); changes there would skip the checks"; leftover=1
+    fi
+  done
+fi
 if [ -f .github/workflows/build-image.yml ]; then
   dockerfile="$(jq -r '.image.dockerfile // "Dockerfile"' "$cfg" 2> /dev/null || echo Dockerfile)"
   if [ ! -f "$dockerfile" ]; then
@@ -195,8 +225,40 @@ else
     warn "repo is public: read docs/GUARDRAILS.md 'Before enabling on a public repo'"
   fi
 
-  if enabled="$(gh api "repos/$repo/actions/permissions" --jq .enabled 2> /dev/null)"; then
-    if [ "$enabled" = true ]; then ok "GitHub Actions enabled"; else fail "GitHub Actions is disabled for this repo"; fi
+  if perms="$(gh api "repos/$repo/actions/permissions" 2> /dev/null)"; then
+    allowed="$(jq -r '.allowed_actions // "all"' <<< "$perms")"
+    if [ "$(jq -r .enabled <<< "$perms")" != true ]; then
+      fail "GitHub Actions is disabled for this repo"
+    elif [ "$allowed" = local_only ]; then
+      fail "Actions policy allows only local actions; the kit needs anthropics/claude-code-action and others"
+    elif [ "$allowed" = selected ]; then
+      if sel="$(gh api "repos/$repo/actions/permissions/selected-actions" 2> /dev/null)"; then
+        # Every non-local action the installed workflows use, as owner/repo@ref.
+        used="$(cat .github/workflows/*.yml .github/actions/*/action.yml 2> /dev/null \
+          | sed -nE 's/^[[:space:]-]*uses:[[:space:]]*([^[:space:]#]+).*/\1/p' | grep -v '^\.' | sort -u || true)"
+        blocked=()
+        while IFS= read -r a; do
+          [ -n "$a" ] || continue
+          [ "${a%%/*}" = actions ] && [ "$(jq -r .github_owned_allowed <<< "$sel")" = true ] && continue
+          hit=0
+          while IFS= read -r pat; do
+            [ -n "$pat" ] && grep -qE "$(glob_re "$pat")" <<< "$a" && { hit=1; break; }
+          done < <(jq -r '.patterns_allowed // [] | .[]' <<< "$sel")
+          [ "$hit" = 1 ] || blocked+=("$a")
+        done <<< "$used"
+        if [ "${#blocked[@]}" = 0 ]; then
+          ok "Actions policy allows every action the kit uses"
+        elif [ "$(jq -r .verified_allowed <<< "$sel")" = true ]; then
+          warn "Actions policy may block ${blocked[*]} (allowed only if from a verified creator); add them to the allowed list"
+        else
+          fail "Actions policy blocks ${blocked[*]}; add them under Settings > Actions > General"
+        fi
+      else
+        warn "Actions allows only selected actions, and the list could not be read; make sure the kit's actions are on it"
+      fi
+    else
+      ok "GitHub Actions enabled"
+    fi
   else
     skip "could not read Actions settings (needs admin)"
   fi
@@ -243,9 +305,11 @@ else
   fi
 
   # Rulesets first (readable without admin), then classic branch protection.
-  if gh api "repos/$repo/rules/branches/$default" --jq '.[].type' 2> /dev/null | grep -qx pull_request; then
+  rules="$(gh api "repos/$repo/rules/branches/$default" --jq '.[].type' 2> /dev/null || true)"
+  protection="$(gh api "repos/$repo/branches/$default/protection" --jq '.required_pull_request_reviews // empty' 2> /dev/null || true)"
+  if grep -qx pull_request <<< "$rules"; then
     ok "$default requires a pull request (ruleset)"
-  elif gh api "repos/$repo/branches/$default/protection" --jq '.required_pull_request_reviews' 2> /dev/null | grep -q .; then
+  elif [ -n "$protection" ]; then
     ok "$default requires a pull request (branch protection)"
   else
     warn "$default does not require a pull request; anything with push access can bypass review"

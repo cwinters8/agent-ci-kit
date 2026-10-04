@@ -226,7 +226,9 @@ list, to run in a separate terminal:
 2. The Claude credential they chose:
    - subscription: `claude setup-token`, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN` and paste at the prompt
    - API: `gh secret set ANTHROPIC_API_KEY` and paste at the prompt
-3. `AGENT_PR_TOKEN`: a fine-grained personal access token for this repo only,
+3. Only if they installed `claude-fix-issue.yml` or `claude-review-sweep.yml`
+   (the workflows that open or push to PRs; `claude.yml` does not use it):
+   `AGENT_PR_TOKEN`, a fine-grained personal access token for this repo only,
    with the permissions `$KIT/README.md` lists, created at
    https://github.com/settings/personal-access-tokens/new. Then
    `gh secret set AGENT_PR_TOKEN`. Without it, CI never runs on agent PRs.
