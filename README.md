@@ -23,7 +23,9 @@ The kit (copy these into your repo)
     pr-checks.yml            the same checks the agent runs, skipped on docs-only PRs    (module 4)
     build-image.yml          source-hash-gated container builds                          (module 4)
   .github/ISSUE_TEMPLATE/agent-fix.yml   a bug report an unattended agent can act on
+  .github/actions/project-setup/   toolchain + install from agent-ci.json, shared by every workflow
   .claude/
+    agent-ci.json            your toolchain and commands, read by every workflow
     skills/                  pr-preflight, review-sweep, code-review, security-review, action-versions
     project-profile.md       your project's facts, read by every skill
     hooks/session-start.sh   installs dependencies in fresh containers
@@ -32,6 +34,7 @@ The kit (copy these into your repo)
   vps/                       always-on self-hosted runner                                 (module 5)
   docs/COST-CONTROLS.md      every cost control, where it lives, what it bounds
   docs/GUARDRAILS.md         what stops an unattended agent from doing damage
+  docs/PROJECT-CONFIG.md     every field of agent-ci.json, with Node and Python examples
 
 The sample app (replace with yours)
   cmd/server/  internal/  Dockerfile  Makefile  go.mod
@@ -68,13 +71,21 @@ serves the API on `:8080`.
 
 ## Adopting it in your project
 
-Copy the kit files, then:
+Copy the kit files, then fill in three files. The workflows themselves stay
+as they are.
 
-- Rewrite `AGENTS.md`'s project sections and every section of
-  `.claude/project-profile.md` for your codebase.
-- In each `claude*.yml`, replace the "Set up Go" step with your toolchain and
-  swap the `make`/`go` entries in `--allowedTools` for your check commands.
-- Point `pr-checks.yml` and `build-image.yml` `paths:` at your source files.
+1. `.claude/agent-ci.json`: your toolchain, install command, checks, the
+   extra commands agents may run, and paths they must never touch. Every
+   workflow and the session hook read it. Field reference and examples in
+   `docs/PROJECT-CONFIG.md`.
+2. `.claude/project-profile.md`: the prose facts the skills need (review
+   focus, threat model, trust boundary).
+3. `AGENTS.md`: the project sections.
+
+Then point the `paths:` filters in `pr-checks.yml` and `build-image.yml` at
+your source files. GitHub reads those before a runner starts, so they are the
+one thing the config cannot set. No container image? Delete `build-image.yml`
+and leave `image` out of the config.
 
 ## Tuning
 

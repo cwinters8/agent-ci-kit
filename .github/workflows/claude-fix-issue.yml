@@ -130,12 +130,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Your project's toolchain. The agent runs the same checks CI runs, so it
-      # needs the same setup pr-checks.yml has.
-      - name: Set up Go
-        uses: actions/setup-go@v7
+      # Your toolchain and dependencies, from .claude/agent-ci.json, so the
+      # agent's checks run exactly as pr-checks.yml runs them. The config is
+      # read from the default branch: the command allowlist and protected paths
+      # below come from reviewed config.
+      - name: Project setup
+        id: project
+        uses: ./.github/actions/project-setup
         with:
-          go-version-file: go.mod
+          config-ref: origin/${{ github.event.repository.default_branch }}
 
       - name: Run Claude Code
         id: claude
@@ -156,17 +159,20 @@ jobs:
                on the issue saying exactly what you need, and make no commits.
             3. Make the smallest change that fixes the root cause. No refactors, no
                drive-by cleanups, no dependency changes unless the bug is in one.
-            4. Never edit .github/, .claude/, go.mod/go.sum unless the bug is in a
-               dependency, or any .env file. The workflow refuses to open a PR that
-               does, so doing it wastes the run.
-            5. Run every command under "## Mechanical checks" in
-               .claude/project-profile.md. All must pass before you commit.
+            4. Never edit .github/, .claude/, any .env file, or a path under
+               `protected_paths` in .claude/agent-ci.json. The workflow refuses to
+               open a PR that does, so doing it wastes the run. Change the
+               dependency files (`dependency_files` there) only when the bug is in
+               a dependency, and run `commands.install` after you do.
+            5. .claude/agent-ci.json `commands` names this project's commands by
+               purpose. Iterate with `test`; run `format` if it exists, then
+               `check`, which must pass before you commit.
             6. Commit with a message that says what was wrong and why the change fixes
                it, then push. Do not open a PR yourself; the workflow does that.
           claude_args: >-
             --model ${{ needs.gate.outputs.model }}
             --max-turns ${{ needs.gate.outputs.max_turns }}
-            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(make check),Bash(make fmt-check),Bash(make vet),Bash(make test),Bash(go test:*),Bash(go vet:*),Bash(go build:*),Bash(gofmt:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*)"
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,${{ steps.project.outputs.allowed-bash }},Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*)"
             --disallowedTools "WebFetch,WebSearch"
 
       # The model is told not to touch these paths; this is what actually
@@ -179,6 +185,9 @@ jobs:
           BRANCH: ${{ steps.claude.outputs.branch_name }}
           BASE: ${{ github.event.repository.default_branch }}
           MAX_LINES: ${{ vars.AGENT_MAX_DIFF_LINES || '400' }}
+          # protected_paths from the config. They add to the fixed list below;
+          # the config cannot remove .github/, .claude/ or .env*.
+          EXTRA: ${{ steps.project.outputs.protected-pattern }}
         run: |
           git fetch origin "$BRANCH" "$BASE" || { echo "pushed=false" >> "$GITHUB_OUTPUT"; exit 0; }
           if [ "$(git rev-list --count "origin/$BASE..origin/$BRANCH")" = "0" ]; then
@@ -188,8 +197,12 @@ jobs:
           fi
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
-          protected="$(git diff --name-only "origin/$BASE...origin/$BRANCH" \
-            | grep -E '^(\.github/|\.claude/)|(^|/)\.env' || true)"
+          pattern='^(\.github/|\.claude/)|(^|/)\.env'
+          [ -z "$EXTRA" ] || pattern="$pattern|$EXTRA"
+          # --no-renames lists both sides of a move, so moving a file out of a
+          # protected path is caught too.
+          protected="$(git diff --no-renames --name-only "origin/$BASE...origin/$BRANCH" \
+            | grep -E "$pattern" || true)"
           if [ -n "$protected" ]; then
             echo "blocked=true" >> "$GITHUB_OUTPUT"
             { echo 'files<<EOF'; echo "$protected"; echo EOF; } >> "$GITHUB_OUTPUT"

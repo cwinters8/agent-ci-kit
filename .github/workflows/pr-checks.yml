@@ -1,7 +1,6 @@
-# The mechanical checks, on every PR that changes Go code. Agents run the same
-# `make check` before they push (see .claude/project-profile.md -> Mechanical
-# checks), so a red run here means the agent skipped a step, not that CI knows
-# something the agent didn't.
+# The mechanical checks, on every PR that changes code. Agents run the same
+# `commands.check` from .claude/agent-ci.json before they push, so a red run here means
+# the agent skipped a step, not that CI knows something the agent didn't.
 #
 # Docs- and config-only PRs skip this job entirely (the `paths:` filter), which
 # matters when agents open PRs all day. If you make this a required status
@@ -11,11 +10,15 @@ name: PR checks
 
 on:
   pull_request:
+    # GitHub reads this list before any runner starts, so it cannot come from
+    # the config. Point it at your source files, manifests and build files.
     paths:
       - '**.go'
       - go.mod
       - go.sum
       - Makefile
+      - .claude/agent-ci.json
+      - .github/actions/project-setup/**
       - .github/workflows/pr-checks.yml
 
 concurrency:
@@ -31,7 +34,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - run: make check
+      # The PR's own config: a PR that changes the toolchain is tested with it.
+      - id: project
+        uses: ./.github/actions/project-setup
+      - name: Run checks
+        env:
+          CHECKS: ${{ steps.project.outputs.check }}
+        run: |
+          while IFS= read -r cmd; do
+            echo "::group::$cmd"
+            bash -euo pipefail -c "$cmd" || { echo "::endgroup::"; echo "::error::Check failed: $cmd"; exit 1; }
+            echo "::endgroup::"
+          done <<< "$CHECKS"

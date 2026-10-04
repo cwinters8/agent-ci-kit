@@ -3,9 +3,10 @@
 # Agents open a lot of PRs, and a lot of them only touch docs, tests or CI. A
 # container image built from an unchanged binary is money spent to produce a
 # byte-identical artifact. This workflow hashes exactly the inputs that end up
-# in the image (Go sources, go.mod/go.sum, Dockerfile) and looks for an image
-# already tagged with that hash. Found: retag it as `latest` and stop. Not
-# found: build and push.
+# in the image (`image.inputs` in .claude/agent-ci.json; for the sample, Go
+# sources, go.mod/go.sum and the Dockerfile) and looks for an image already
+# tagged with that hash. Found: retag it as `latest` and stop. Not found: build
+# and push.
 #
 # It is the same idea as Expo's fingerprint gate (hash the native layer, reuse a
 # matching build, otherwise rebuild), applied to a plain Go service.
@@ -19,11 +20,14 @@ on:
   push:
     branches: [main]
     # First gate, free: a push touching none of these never starts a runner.
+    # GitHub reads it before any runner exists, so it cannot come from the
+    # config: keep it a superset of `image.inputs`.
     paths:
       - '**.go'
       - go.mod
       - go.sum
       - Dockerfile
+      - .claude/agent-ci.json
       - .github/workflows/build-image.yml
   workflow_dispatch:
 
@@ -47,16 +51,30 @@ jobs:
 
       # Second gate, cheap: the path filter cannot tell a comment-only edit to a
       # test file from a real change, and it fires on this workflow file too.
-      # Hash only what reaches the binary. _test.go files are excluded on
-      # purpose: they never ship.
+      # Hash only what reaches the image, as `image.inputs` lists it. The
+      # sample excludes _test.go files on purpose: they never ship.
       - name: Hash image inputs
         id: hash
         run: |
-          hash="$( { git ls-files -- '*.go' ':!:*_test.go' go.mod go.sum Dockerfile \
-            | sort | xargs sha256sum; } | sha256sum | cut -c1-16)"
+          cfg=.claude/agent-ci.json
+          mapfile -t inputs < <(jq -r '.image.inputs // [] | .[]' "$cfg")
+          if [ "${#inputs[@]}" -eq 0 ]; then
+            echo "::error file=$cfg::No image.inputs. Add them, or delete this workflow if you do not ship an image."
+            exit 1
+          fi
+          context="$(jq -r '.image.context // "."' "$cfg")"
+          dockerfile="$(jq -r '.image.dockerfile // "Dockerfile"' "$cfg")"
+          # The build settings are part of the hash: pointing at another
+          # context or Dockerfile must build, not retag the old image.
+          hash="$( { git ls-files -z -- "${inputs[@]}" | sort -z | xargs -0 sha256sum
+            printf 'context=%s\ndockerfile=%s\n' "$context" "$dockerfile"; } | sha256sum | cut -c1-16)"
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          echo "hash=$hash" >> "$GITHUB_OUTPUT"
-          echo "image=$image" >> "$GITHUB_OUTPUT"
+          {
+            echo "hash=$hash"
+            echo "image=$image"
+            echo "context=$context"
+            echo "dockerfile=$dockerfile"
+          } >> "$GITHUB_OUTPUT"
           echo "Image inputs hash: $hash"
 
       - name: Log in to GHCR
@@ -97,7 +115,8 @@ jobs:
         if: steps.existing.outputs.found == 'false'
         uses: docker/build-push-action@v7
         with:
-          context: .
+          context: ${{ steps.hash.outputs.context }}
+          file: ${{ steps.hash.outputs.dockerfile }}
           push: true
           tags: |
             ${{ steps.hash.outputs.image }}:src-${{ steps.hash.outputs.hash }}

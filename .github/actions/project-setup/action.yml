@@ -1,0 +1,170 @@
+# Sets up your project's toolchain from .claude/agent-ci.json and exposes the
+# config to the calling workflow. Every workflow that runs your checks (CI and
+# the agents alike) goes through this one action, so a toolchain change is one
+# edit to the config, not one edit per workflow.
+#
+# Runs after actions/checkout. Agent workflows pass `config-ref` pointing at
+# the default branch, so the command allowlist and protected paths come from
+# reviewed config, never from the branch the agent is working on.
+
+name: Project setup
+description: Install the toolchain and dependencies declared in .claude/agent-ci.json.
+
+inputs:
+  config-ref:
+    description: Git ref to read the config from (e.g. origin/main). Empty reads the working tree.
+    required: false
+    default: ''
+  install:
+    description: Run `commands.install` after the toolchain is set up.
+    required: false
+    default: 'true'
+
+outputs:
+  check:
+    description: The `commands.check` gate, one command per line.
+    value: ${{ steps.cfg.outputs.check }}
+  allowed-bash:
+    description: 'Every named command, plus `allow`, as comma-separated Bash(...) entries for --allowedTools. Install is left out when it is not one plain command.'
+    value: ${{ steps.cfg.outputs.allowed-bash }}
+  protected-pattern:
+    description: ERE matching `protected_paths`; empty when there are none.
+    value: ${{ steps.cfg.outputs.protected-pattern }}
+  dependency-files:
+    description: '`dependency_files`, space-separated.'
+    value: ${{ steps.cfg.outputs.dependency-files }}
+
+runs:
+  using: composite
+  steps:
+    - name: Read .claude/agent-ci.json
+      id: cfg
+      shell: bash
+      env:
+        CONFIG_REF: ${{ inputs.config-ref }}
+      run: |
+        set -euo pipefail
+        file=.claude/agent-ci.json
+        if [ -n "$CONFIG_REF" ] && cfg="$(git show "$CONFIG_REF:$file" 2>/dev/null)"; then
+          echo "Config from $CONFIG_REF"
+        elif [ -f "$file" ]; then
+          # The branch that first adds the config has nothing on the base yet.
+          [ -z "$CONFIG_REF" ] || echo "::warning::$file not found on $CONFIG_REF; using the working tree copy."
+          cfg="$(cat "$file")"
+        else
+          echo "::error file=$file::Missing. Copy it from the kit and fill it in; see docs/PROJECT-CONFIG.md."
+          exit 1
+        fi
+
+        # Named commands and `allow` land inside
+        # --allowedTools "...", so anything that could break out of that
+        # string or chain a second command is rejected.
+        lib='
+          def roles: ["install", "format", "lint", "typecheck", "test", "build", "check"];
+          def list: if type == "array" then .[] else . end;
+          def check: [.commands.check // empty | list];
+          def granted: [.commands // {} | to_entries[] | select(.key != "install") | .value | list] + (.allow // []);
+          def cmd: type == "string" and test("^[A-Za-z0-9 ._:/*=@+-]+$");
+          def unknown($at; $known): (. // {}) | keys[] | select(. as $k | $known | index([$k]) | not)
+            | "\($at)\(.): unknown field; expected one of \($known | join(", "))";'
+        errors="$(jq -r "$lib"'
+          [
+            (if (.toolchain | type) != "object" then "toolchain: required; {} if the runner image already has what you need" else empty end),
+            (if (.commands | type) != "object" then "commands: required" else empty end),
+            # A misspelled field would otherwise be ignored silently, e.g. a
+            # protected path dropping out of the guardrail.
+            unknown(""; ["$schema", "toolchain", "commands", "allow", "dependency_files", "protected_paths", "image"]),
+            (.toolchain | unknown("toolchain."; ["go", "node", "python"])),
+            (.toolchain.go | unknown("toolchain.go."; ["version_file"])),
+            (.toolchain.node | unknown("toolchain.node."; ["version_file", "package_manager"])),
+            (.toolchain.python | unknown("toolchain.python."; ["version_file"])),
+            (.toolchain.node.package_manager // "npm" | select(IN("npm", "pnpm", "yarn") | not) | "toolchain.node.package_manager: \(tojson) is not npm, pnpm or yarn"),
+            # An empty version file makes setup-* fall back to whatever runtime
+            # is on PATH, so a check could pass on an unpinned version.
+            (.toolchain // {} | to_entries[] | select(.value | type != "object" or (.version_file | type != "string" or length == 0))
+              | "toolchain.\(.key).version_file: required, the file that pins the version"),
+            (.commands | unknown("commands."; roles)),
+            (.image | unknown("image."; ["inputs", "context", "dockerfile"])),
+            # build-image.yml only runs after merge, so catch a broken image
+            # block here, on the PR that introduces it.
+            (if .image == null then empty
+             elif (.image | type) != "object" then "image: must be an object"
+             elif (.image.inputs | type) != "array" or (.image.inputs | length) == 0 or any(.image.inputs[]; type != "string" or length == 0)
+               then "image.inputs: required, a non-empty list of git pathspecs"
+             else (.image | (.context, .dockerfile) | select(. != null and (type != "string" or length == 0))
+               | "image.context and image.dockerfile must be non-empty strings")
+             end),
+            (if (check | length) == 0 then "commands.check: required, the gate CI and agents run before pushing" else empty end),
+            (granted[] | select(cmd | not) | "command not allowed (use one plain command, no quotes or shell operators): \(tojson)"),
+            ((.protected_paths // [])[] | select(type != "string" or length == 0) | "protected_paths: entries must be non-empty strings")
+          ] | .[]' <<< "$cfg")" || { echo "::error file=$file::Not valid JSON, or a field has the wrong type."; exit 1; }
+        if [ -n "$errors" ]; then
+          while IFS= read -r e; do echo "::error file=$file::$e"; done <<< "$errors"
+          exit 1
+        fi
+
+        q() { jq -r "$lib $1" <<< "$cfg"; }
+        # Agents rerun install after changing a dependency file or checking
+        # out another PR, so it is granted too when it is one plain command.
+        granted='granted'
+        install_ok="$(q '.commands.install // "" | if . == "" then "none" elif cmd then "yes" else "no" end')"
+        if [ "$install_ok" = "yes" ]; then
+          granted='granted + [.commands.install]'
+        elif [ "$install_ok" = "no" ]; then
+          echo "::warning file=$file::commands.install is not a single plain command, so agents cannot rerun it. Wrap it in a script or Makefile target."
+        fi
+        delim="EOF_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+        {
+          echo "go=$(q '.toolchain.go != null')"
+          echo "go-version-file=$(q '.toolchain.go.version_file // ""')"
+          echo "node=$(q '.toolchain.node != null')"
+          echo "node-version-file=$(q '.toolchain.node.version_file // ""')"
+          echo "node-package-manager=$(q '.toolchain.node.package_manager // "npm"')"
+          echo "python=$(q '.toolchain.python != null')"
+          echo "python-version-file=$(q '.toolchain.python.version_file // ""')"
+          echo "dependency-files=$(q '(.dependency_files // []) | join(" ")')"
+          echo "allowed-bash=$(q "$granted"' | reduce .[] as $c ([]; if index([$c]) then . else . + [$c] end) | map("Bash(\(.))") | join(",")')"
+          pattern="$(q '(.protected_paths // [])[]' | sed -e 's/[][\.*^$+?(){}|]/\\&/g' | paste -sd'|' -)"
+          echo "protected-pattern=${pattern:+^($pattern)}"
+          echo "install<<$delim"; q '.commands.install // ""'; echo "$delim"
+          echo "check<<$delim"; q 'check[]'; echo "$delim"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Set up Go
+      if: steps.cfg.outputs.go == 'true'
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: ${{ steps.cfg.outputs.go-version-file }}
+
+    - name: Set up Node
+      if: steps.cfg.outputs.node == 'true'
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: ${{ steps.cfg.outputs.node-version-file }}
+
+    # pnpm and yarn come through corepack, which puts the version your
+    # package.json `packageManager` field pins on PATH. Node bundles corepack
+    # only up to 24; install it on newer majors.
+    - name: Enable corepack
+      if: steps.cfg.outputs.node == 'true' && steps.cfg.outputs.node-package-manager != 'npm'
+      shell: bash
+      run: |
+        command -v corepack > /dev/null || npm install -g corepack
+        corepack enable
+
+    - name: Set up Python
+      if: steps.cfg.outputs.python == 'true'
+      uses: actions/setup-python@v7
+      with:
+        python-version-file: ${{ steps.cfg.outputs.python-version-file }}
+
+    - name: Install dependencies
+      if: inputs.install == 'true' && steps.cfg.outputs.install != ''
+      shell: bash
+      env:
+        INSTALL: ${{ steps.cfg.outputs.install }}
+      # The flag tells .claude/hooks/session-start.sh not to install again
+      # when the agent's session starts in this job.
+      run: |
+        bash -euo pipefail -c "$INSTALL"
+        echo "AGENT_CI_INSTALLED=true" >> "$GITHUB_ENV"
