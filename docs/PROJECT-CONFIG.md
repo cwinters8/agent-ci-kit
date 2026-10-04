@@ -16,7 +16,7 @@ The copy in this repo is filled in for the Go sample.
 | `allow` | no | agent workflows | Extra permission patterns for agents beyond the named commands and git, e.g. `go test:*` to run one package. A trailing `:*` allows any arguments. Anything not named or listed is denied in a headless run. |
 | `dependency_files` | no | fix agent prompt | Manifests and lockfiles. The fix agent changes them only when the bug is in a dependency. |
 | `protected_paths` | no | fix workflow guardrail | Path prefixes an unattended agent may never change. The fix workflow refuses to open a PR that touches one. `.github/`, `.claude/` and `.env*` are always protected and cannot be removed. |
-| `image` | no | `build-image.yml` | `inputs`: git pathspecs for everything that ends up in the image (`:!:` excludes); their content hash decides whether to build. `context` and `dockerfile` default to `.` and `Dockerfile`. Leave `image` out and delete the workflow if you ship no image. |
+| `image` | no | `build-image.yml` | `inputs`: git pathspecs for everything that ends up in the image (`:!:` excludes); their content hash decides whether to build. `context` and `dockerfile` default to `.` and `Dockerfile`. Leave `image` out and delete the workflow if you ship no image. The setup action rejects an `image` without `inputs`, so a broken block fails on the PR, not after merge. |
 
 ## Commands
 
@@ -26,7 +26,7 @@ required.
 
 | Name | Who runs it | When |
 | --- | --- | --- |
-| `install` | `project-setup` action, `session-start.sh`, review sweep | Once, after the toolchain, before the agent starts. Granted only to the review sweep, which reinstalls after checking out each PR. |
+| `install` | `project-setup` action, `session-start.sh`, agents | Once, after the toolchain, before the agent starts. Agents rerun it after changing a dependency file, and the review sweep after checking out each PR. |
 | `format` | agents | Before `check`, so formatting never fails the gate. |
 | `lint` | agents | To check one concern without the full gate. |
 | `typecheck` | agents | Same. |
@@ -34,15 +34,15 @@ required.
 | `build` | agents | To confirm the project still compiles or bundles. |
 | `check` | `pr-checks.yml`, agents | The gate: CI runs it on every PR, agents must pass it before pushing. One command or a list run in order. Prefer one entry point (`make check`, `pnpm check`) so CI and agents can never drift. |
 
-Every named command except `install` is also on the agents' allowlist, so you
-never list a command twice.
+Every named command is also on the agents' allowlist, so you never list a
+command twice.
 
 Commands are single commands: no quotes, `&&`, pipes or `$`. They become
 Claude Code permission rules, and the setup action rejects anything that could
 chain a second command. Put a multi-step command behind a Makefile target or a
 package script. `install` may use shell operators (`pip install uv && uv sync`),
-but then the review sweep cannot rerun it; give it one plain command if your
-PRs change dependencies.
+but then agents cannot rerun it; give it one plain command if your PRs change
+dependencies.
 
 ## Trust
 

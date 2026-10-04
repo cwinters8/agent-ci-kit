@@ -19,17 +19,13 @@ inputs:
     description: Run `commands.install` after the toolchain is set up.
     required: false
     default: 'true'
-  grant-install:
-    description: Add `commands.install` to allowed-bash, for agents that check out other branches and must reinstall.
-    required: false
-    default: 'false'
 
 outputs:
   check:
     description: The `commands.check` gate, one command per line.
     value: ${{ steps.cfg.outputs.check }}
   allowed-bash:
-    description: 'Every named command except install (unless grant-install), plus `allow`, as comma-separated Bash(...) entries for --allowedTools.'
+    description: 'Every named command, plus `allow`, as comma-separated Bash(...) entries for --allowedTools. Install is left out when it is not one plain command.'
     value: ${{ steps.cfg.outputs.allowed-bash }}
   protected-pattern:
     description: ERE matching `protected_paths`; empty when there are none.
@@ -46,7 +42,6 @@ runs:
       shell: bash
       env:
         CONFIG_REF: ${{ inputs.config-ref }}
-        GRANT_INSTALL: ${{ inputs.grant-install }}
       run: |
         set -euo pipefail
         file=.claude/agent-ci.json
@@ -61,7 +56,7 @@ runs:
           exit 1
         fi
 
-        # Named commands (except install) and `allow` land inside
+        # Named commands and `allow` land inside
         # --allowedTools "...", so anything that could break out of that
         # string or chain a second command is rejected.
         lib='
@@ -86,6 +81,15 @@ runs:
             (.toolchain.node.package_manager // "npm" | select(IN("npm", "pnpm", "yarn") | not) | "toolchain.node.package_manager: \(tojson) is not npm, pnpm or yarn"),
             (.commands | unknown("commands."; roles)),
             (.image | unknown("image."; ["inputs", "context", "dockerfile"])),
+            # build-image.yml only runs after merge, so catch a broken image
+            # block here, on the PR that introduces it.
+            (if .image == null then empty
+             elif (.image | type) != "object" then "image: must be an object"
+             elif (.image.inputs | type) != "array" or (.image.inputs | length) == 0 or any(.image.inputs[]; type != "string" or length == 0)
+               then "image.inputs: required, a non-empty list of git pathspecs"
+             else (.image | (.context, .dockerfile) | select(. != null and (type != "string" or length == 0))
+               | "image.context and image.dockerfile must be non-empty strings")
+             end),
             (if (check | length) == 0 then "commands.check: required, the gate CI and agents run before pushing" else empty end),
             (granted[] | select(cmd | not) | "command not allowed (use one plain command, no quotes or shell operators): \(tojson)"),
             ((.protected_paths // [])[] | select(type != "string" or length == 0) | "protected_paths: entries must be non-empty strings")
@@ -96,14 +100,14 @@ runs:
         fi
 
         q() { jq -r "$lib $1" <<< "$cfg"; }
+        # Agents rerun install after changing a dependency file or checking
+        # out another PR, so it is granted too when it is one plain command.
         granted='granted'
-        if [ "$GRANT_INSTALL" = "true" ]; then
-          install_ok="$(q '.commands.install // "" | if . == "" then "none" elif cmd then "yes" else "no" end')"
-          if [ "$install_ok" = "yes" ]; then
-            granted='granted + [.commands.install]'
-          elif [ "$install_ok" = "no" ]; then
-            echo "::warning file=$file::commands.install is not a single plain command, so agents cannot rerun it. Wrap it in a script or Makefile target."
-          fi
+        install_ok="$(q '.commands.install // "" | if . == "" then "none" elif cmd then "yes" else "no" end')"
+        if [ "$install_ok" = "yes" ]; then
+          granted='granted + [.commands.install]'
+        elif [ "$install_ok" = "no" ]; then
+          echo "::warning file=$file::commands.install is not a single plain command, so agents cannot rerun it. Wrap it in a script or Makefile target."
         fi
         delim="EOF_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
         {

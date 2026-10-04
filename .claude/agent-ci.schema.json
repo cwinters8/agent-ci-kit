@@ -82,7 +82,7 @@
     },
     "commands": {
       "type": "object",
-      "description": "Your project's commands, named by purpose. Workflows and agents pick the one they need by name; every one except install is also allowed for agents.",
+      "description": "Your project's commands, named by purpose. Workflows and agents pick the one they need by name; every one is also allowed for agents.",
       "additionalProperties": false,
       "required": [
         "check"
@@ -90,7 +90,7 @@
       "properties": {
         "install": {
           "type": "string",
-          "description": "Installs dependencies once the toolchain is set up. Runs in CI before the agent starts and in fresh cloud sessions. Only the review sweep may rerun it, and only when it is one plain command.",
+          "description": "Installs dependencies once the toolchain is set up. Runs in CI before the agent starts and in fresh cloud sessions. Agents may rerun it after changing dependencies, but only when it is one plain command.",
           "examples": [
             "go mod download",
             "pnpm install --frozen-lockfile",
