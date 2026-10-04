@@ -43,9 +43,24 @@ The sample app (replace with yours)
 2. Install the Claude GitHub App: https://github.com/apps/claude
 3. Add repo secrets:
    - `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token`; uses your Pro/Max plan) **or** `ANTHROPIC_API_KEY` (API billing)
-   - `AGENT_PR_TOKEN`: fine-grained PAT, this repo only, Contents + Pull requests read/write. Without it, CI does not run on agent PRs.
+   - `AGENT_PR_TOKEN` (required): a fine-grained personal access token on your
+     own account (GitHub has no repo-owned tokens), limited to this repo only.
+     Permissions: Contents and Pull requests read/write; add Issues read/write
+     and Actions read-only if you use the daily review sweep. The workflow opens
+     agent PRs with it. The built-in `GITHUB_TOKEN` is not a drop-in
+     replacement: GitHub blocks Actions from creating PRs unless you turn on
+     "Allow GitHub Actions to create and approve pull requests", and even then
+     CI on those PRs waits until someone clicks "Approve workflows to run". If
+     you accept that manual step, enable the setting and point the "Open draft
+     PR" step at `github.token`. If the PR step fails, the workflow comments a
+     link on the issue so you can open the PR by hand.
 4. Create labels: `agent:fix`, `agent:fix-opus`, `agent:needs-human`, `agent:large-diff`.
-5. Protect `main` (require a PR).
+5. Protect `main`: require a pull request, but **not** an approving review.
+   Agent PRs are opened with your PAT, so GitHub lists you as the author, and
+   you cannot approve your own PR. To keep required approvals, put a second
+   (bot) account's PAT in `AGENT_PR_TOKEN`, or use your own GitHub App and mint
+   its token in the workflow with `actions/create-github-app-token`. App tokens
+   expire after an hour, so one pasted into the secret stops working.
 6. Open a bug with the "Bug for the agent" template and label it `agent:fix`.
 
 Locally: `make check` runs exactly what CI and the agents run. `make run`

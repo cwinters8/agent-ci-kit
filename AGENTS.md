@@ -132,7 +132,10 @@ cannot complete.
 - Agent credentials (`ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN`) live only
   in repo secrets and are scoped to the step that needs them.
 - Agent branches use the `claude/` prefix. Agents never push elsewhere.
-- Agents do not edit `.github/` or `.claude/`. The fix workflow refuses
-  to open a PR that does; a human makes those changes.
+- Unattended agents (the `claude-*.yml` workflows) do not edit `.github/` or
+  `.claude/`: an agent that can edit a workflow can grant itself any
+  permission on its next run. The fix workflow refuses to open a PR that does.
+  Changes there come from the maintainer, directly or through a session the
+  maintainer is supervising and reviews before merge.
 - Standard library only unless a dependency clearly earns its place.
 - New behavior ships with a test in the same change.

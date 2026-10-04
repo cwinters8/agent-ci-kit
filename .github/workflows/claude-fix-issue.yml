@@ -14,13 +14,20 @@
 #   2. Add ONE of these repo secrets:
 #        CLAUDE_CODE_OAUTH_TOKEN  Pro/Max subscription (`claude setup-token`), or
 #        ANTHROPIC_API_KEY        pay-per-token API billing.
-#      And, strongly recommended:
-#        AGENT_PR_TOKEN  fine-grained PAT (this repo only; Contents + Pull
-#                        requests read/write). A PR opened with the default
-#                        GITHUB_TOKEN does not trigger your other workflows, so
-#                        without this your CI never runs on agent PRs. The Claude
-#                        App token cannot be used here: the action revokes it
-#                        when its step ends.
+#      And, required:
+#        AGENT_PR_TOKEN  fine-grained PAT on your account, limited to this
+#                        repo (Contents + Pull requests read/write). The
+#                        workflow opens the PR with it. GITHUB_TOKEN is not
+#                        a drop-in: GitHub refuses PRs from Actions unless
+#                        "Allow GitHub Actions to create and approve pull
+#                        requests" is on (off by default), and CI on a PR it
+#                        opens waits for someone to click "Approve workflows
+#                        to run". The Claude App token cannot be used either:
+#                        the action revokes it when its step ends. PRs the PAT
+#                        opens list you as author, so you cannot approve them
+#                        yourself; don't require approvals on main, or use a
+#                        second account's PAT or a GitHub App token minted per
+#                        run (actions/create-github-app-token).
 #   3. Optional repo variables (Settings -> Variables), defaults in brackets:
 #        AGENT_DAILY_RUN_CAP [10]   max agent runs per UTC day
 #        AGENT_MAX_TURNS_SONNET [30], AGENT_MAX_TURNS_OPUS [40]
@@ -212,11 +219,11 @@ jobs:
             "$BRANCH" "$FILES" | gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file -
 
       - name: Open draft PR
+        id: open_pr
         if: steps.guard.outputs.pushed == 'true' && steps.guard.outputs.blocked == 'false'
         env:
-          # A PAT so the PR triggers CI; falls back to GITHUB_TOKEN, whose PRs
-          # trigger nothing. See setup step 2.
-          GH_TOKEN: ${{ secrets.AGENT_PR_TOKEN || github.token }}
+          # The PAT, so CI runs unattended on the PR. See setup step 2.
+          GH_TOKEN: ${{ secrets.AGENT_PR_TOKEN }}
           BRANCH: ${{ steps.claude.outputs.branch_name }}
           BASE: ${{ github.event.repository.default_branch }}
           ISSUE: ${{ github.event.issue.number }}
@@ -225,6 +232,10 @@ jobs:
           LINES: ${{ steps.guard.outputs.lines }}
           LARGE: ${{ steps.guard.outputs.large }}
         run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::AGENT_PR_TOKEN is not set, so no PR can be opened. See setup step 2 at the top of this file."
+            exit 1
+          fi
           if [ -n "$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --json number --jq '.[0].number')" ]; then
             echo "PR already exists for $BRANCH"
             exit 0
@@ -236,6 +247,22 @@ jobs:
           gh pr create --repo "$GITHUB_REPOSITORY" --draft \
             --base "$BASE" --head "$BRANCH" \
             --title "fix: $TITLE" --body-file "$RUNNER_TEMP/body.md" $labels
+
+      # The agent's work is already pushed and paid for. If the PR could not be
+      # opened (missing or expired PAT, missing scope), don't strand it: tell the
+      # issue where the branch is and how to open the PR by hand.
+      - name: Report stranded branch
+        if: always() && steps.open_pr.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          BRANCH: ${{ steps.claude.outputs.branch_name }}
+          BASE: ${{ github.event.repository.default_branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMPARE_URL: ${{ github.server_url }}/${{ github.repository }}/compare/${{ github.event.repository.default_branch }}...${{ steps.claude.outputs.branch_name }}?expand=1
+        run: |
+          printf 'The agent pushed a fix to `%s`, but the workflow could not open the PR ([run log](%s)). Check `AGENT_PR_TOKEN`, then [open the PR by hand](%s) against `%s`.\n' \
+            "$BRANCH" "$RUN_URL" "$COMPARE_URL" "$BASE" | gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file -
 
       # What this run cost, in the job summary. On a subscription the dollar
       # figure is notional (what the same tokens would cost on the API), which is
