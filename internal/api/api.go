@@ -4,6 +4,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -65,6 +66,11 @@ func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return false
+	}
+	// A request holds exactly one JSON value; anything after it is an error.
+	if _, err := dec.Token(); err != io.EOF {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return false
 	}

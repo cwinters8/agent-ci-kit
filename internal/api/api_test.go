@@ -105,6 +105,8 @@ func TestBadRequests(t *testing.T) {
 		want                     int
 	}{
 		{"malformed JSON", "POST", "/todos", `{"title":`, http.StatusBadRequest},
+		{"trailing garbage", "POST", "/todos", `{"title":"a"} garbage`, http.StatusBadRequest},
+		{"two objects", "POST", "/todos", `{"title":"a"}{"title":"b"}`, http.StatusBadRequest},
 		{"unknown field", "POST", "/todos", `{"title":"x","owner":"me"}`, http.StatusBadRequest},
 		{"blank title", "POST", "/todos", `{"title":"  "}`, http.StatusUnprocessableEntity},
 		{"non-numeric id", "GET", "/todos/abc", "", http.StatusBadRequest},
