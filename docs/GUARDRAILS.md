@@ -23,8 +23,10 @@ installed. On a public repo:
 - Keep `allowed_non_write_users` unset (the default). Never set it to `*`.
 - Disable the `claude-review-sweep.yml` schedule, or restrict it to PRs by
   maintainers: it reads review text from anyone and can push.
-  `claude-review-respond.yml` already ignores reviewers without write access
-  and unlisted bots.
+  `claude-review-respond.yml` only starts for maintainers and listed bots,
+  and tells the agent to skip comments from anyone else. That filter is an
+  instruction to the model, not enforcement, so a stranger's comment on an
+  agent PR can still reach it. Disable it too unless you accept that.
 - Never point agent workflows at a self-hosted runner (see `vps/README.md`).
 - Turn on branch protection requiring review on the default branch.
 - Only `@claude` on PRs whose authors you trust. The run installs the PR's
