@@ -48,12 +48,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Your project's toolchain. The agent runs the same checks CI runs, so it
-      # needs the same setup pr-checks.yml has.
-      - name: Set up Go
-        uses: actions/setup-go@v7
+      # Your toolchain and dependencies, from .claude/agent-ci.json. The config
+      # is read from the default branch, so a PR cannot widen the command
+      # allowlist the agent runs it under.
+      - name: Project setup
+        id: project
+        uses: ./.github/actions/project-setup
         with:
-          go-version-file: go.mod
+          config-ref: origin/${{ github.event.repository.default_branch }}
 
       - name: Run Claude Code
         uses: anthropics/claude-code-action@v1
@@ -66,5 +68,5 @@ jobs:
           claude_args: >-
             --model ${{ vars.AGENT_INTERACTIVE_MODEL || 'sonnet' }}
             --max-turns ${{ vars.AGENT_MAX_TURNS_INTERACTIVE || '20' }}
-            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(make check),Bash(make fmt-check),Bash(make vet),Bash(make test),Bash(go test:*),Bash(go vet:*),Bash(go build:*),Bash(gofmt:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*)"
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,${{ steps.project.outputs.allowed-bash }},Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*)"
             --disallowedTools "WebFetch,WebSearch"

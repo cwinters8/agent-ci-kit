@@ -1,0 +1,24 @@
+{
+  "$schema": "./agent-ci.schema.json",
+  "toolchain": {
+    "go": { "version_file": "go.mod" }
+  },
+  "install": "go mod download",
+  "checks": ["make check"],
+  "agent_commands": [
+    "make fmt-check",
+    "make vet",
+    "make test",
+    "go test:*",
+    "go vet:*",
+    "go build:*",
+    "gofmt:*"
+  ],
+  "dependency_files": ["go.mod", "go.sum"],
+  "protected_paths": [],
+  "image": {
+    "inputs": ["*.go", ":!:*_test.go", "go.mod", "go.sum", "Dockerfile"],
+    "context": ".",
+    "dockerfile": "Dockerfile"
+  }
+}

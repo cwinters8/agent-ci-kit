@@ -24,12 +24,15 @@ collaborators you do not control.
 
 ## Mechanical checks
 
+Every command in `checks` in `.claude/agent-ci.json`, in order. That file is
+the machine-readable source: `.github/workflows/pr-checks.yml` runs the same
+list, so passing locally means passing CI. For this project it is:
+
 - `make check`: runs, in order, `gofmt -l .` (fails on any unformatted file),
   `go vet ./...`, `go test -race -count=1 ./...`.
 
-CI runs the same target in `.github/workflows/pr-checks.yml` on every PR that
-touches Go code. Nothing mechanical covers the Dockerfile or the workflows
-beyond actionlint in review; read those diffs.
+Nothing mechanical covers the Dockerfile or the workflows beyond actionlint in
+review; read those diffs.
 
 ## Review focus
 

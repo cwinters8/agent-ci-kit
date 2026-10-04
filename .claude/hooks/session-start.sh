@@ -13,9 +13,16 @@ fi
 
 cd "$CLAUDE_PROJECT_DIR"
 
-# Pick the install command from what the repo contains. Edit this block for
-# other stacks (e.g. `uv sync`, `bundle install`).
-if [ -f go.mod ]; then
+# `install` in .claude/agent-ci.json, the same command CI runs. Without a
+# config (or jq), guess from what the repo contains.
+install_cmd=""
+if [ -f .claude/agent-ci.json ] && command -v jq > /dev/null; then
+  install_cmd="$(jq -r '.install // ""' .claude/agent-ci.json)"
+fi
+
+if [ -n "$install_cmd" ]; then
+  install=(bash -c "$install_cmd")
+elif [ -f go.mod ]; then
   install=(go mod download)
 elif [ -f pnpm-lock.yaml ]; then
   install=(pnpm install --frozen-lockfile)

@@ -49,12 +49,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Your project's toolchain. The agent runs the same checks CI runs, so it
-      # needs the same setup pr-checks.yml has.
-      - name: Set up Go
-        uses: actions/setup-go@v7
+      # Your toolchain and dependencies, from .claude/agent-ci.json. The config
+      # is read from the default branch, so the command allowlist comes from
+      # reviewed config, not from a branch under review.
+      - name: Project setup
+        id: project
+        uses: ./.github/actions/project-setup
         with:
-          go-version-file: go.mod
+          config-ref: origin/${{ github.event.repository.default_branch }}
 
       - name: Run review sweep
         uses: anthropics/claude-code-action@v1
@@ -68,7 +70,7 @@ jobs:
           claude_args: >-
             --model ${{ vars.AGENT_SWEEP_MODEL || 'sonnet' }}
             --max-turns ${{ vars.AGENT_MAX_TURNS_SWEEP || '60' }}
-            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Skill,Bash(gh pr:*),Bash(gh api:*),Bash(gh run:*),Bash(make check),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(git:*)"
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Skill,Bash(gh pr:*),Bash(gh api:*),Bash(gh run:*),${{ steps.project.outputs.allowed-bash }},Bash(git:*)"
             --disallowedTools "WebFetch,WebSearch"
         env:
           GH_TOKEN: ${{ secrets.AGENT_PR_TOKEN || github.token }}
