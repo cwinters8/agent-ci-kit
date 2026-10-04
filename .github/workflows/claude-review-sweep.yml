@@ -67,6 +67,12 @@ jobs:
             Run the review-sweep skill in .claude/skills/review-sweep/ on ${{ github.repository }}
             ${{ github.event.inputs.pr && format('for PR #{0} only', github.event.inputs.pr) || 'across every open PR' }}.
             Use the gh CLI for GitHub reads and writes.
+            After checking out each PR branch, run `commands.install` from
+            .claude/agent-ci.json before any checks, so no PR is tested with
+            another branch's dependencies. The runtimes on this runner are the
+            default branch's: if a PR changes a `toolchain` version file or
+            .claude/agent-ci.json itself, do not judge it by local checks; use
+            the result of its own CI run instead.
           claude_args: >-
             --model ${{ vars.AGENT_SWEEP_MODEL || 'sonnet' }}
             --max-turns ${{ vars.AGENT_MAX_TURNS_SWEEP || '60' }}
