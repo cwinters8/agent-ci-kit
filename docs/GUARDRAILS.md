@@ -6,7 +6,7 @@ by asking the model nicely.
 | Guardrail | Enforced by |
 | --- | --- |
 | Only maintainers can start a run | label/comment triggers need write access; the action re-checks that the actor is a human with write access |
-| Agent never touches CI, agent config or secrets | `Guardrails` step refuses to open a PR if the diff touches `.github/`, `.claude/`, `.env*` or a `protected_paths` entry in `.claude/agent-ci.json`, and labels the issue `agent:needs-human`. The config can add paths, never remove the fixed three |
+| Agent never touches CI, agent config or secrets | `Guardrails` step refuses to open a PR if the diff touches `.github/`, `.claude/`, `.env*` or a `protected_paths` entry in `.claude/agent-ci.json`, and labels the issue `agent:needs-human`. The config can add paths, never remove the fixed three. `claude-review-respond.yml` pushes to an open PR instead, so a pre-push hook refuses those paths and a check after the run puts the PR back in draft with `agent:needs-human` if any got through |
 | Review bots cannot spend at will | `claude-review-respond.yml` starts only for maintainers and bots in `AGENT_REVIEW_BOTS`, only on agent branches, and never for `claude[bot]`, so the agent's own replies cannot loop |
 | Large diffs are flagged | diffs over `AGENT_MAX_DIFF_LINES` get `agent:large-diff` |
 | Agent cannot browse the web | `--disallowedTools WebFetch,WebSearch` (blocks prompt injection from fetched pages and data exfiltration by URL) |

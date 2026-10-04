@@ -53,29 +53,25 @@ jobs:
     timeout-minutes: 2
     permissions:
       actions: read
+      issues: read
       pull-requests: write
     outputs:
       allowed: ${{ steps.budget.outputs.allowed }}
     steps:
       # claude.yml answers `@claude` in an inline comment (matched without
       # case, as claude.yml and the action do). Leave those reviews to it
-      # rather than running two agents on one review. An approval with no body
-      # and no inline comments has nothing to triage.
-      - name: Skip reviews with nothing for this workflow
+      # rather than running two agents on one review. Bare approvals still run:
+      # an approval can be the verdict that makes the PR ready to merge.
+      - name: Skip reviews claude.yml handles
         id: content
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           REVIEW: ${{ github.event.review.id }}
-          STATE: ${{ github.event.review.state }}
-          BODY: ${{ github.event.review.body }}
         run: |
           bodies="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews/$REVIEW/comments" --jq '.[].body')"
           if grep -qi '@claude' <<< "$bodies"; then
             echo "Inline @claude mention; claude.yml handles this review."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif [ "$STATE" = "approved" ] && [ -z "$BODY" ] && [ -z "$bodies" ]; then
-            echo "Bare approval; nothing to triage."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -106,10 +102,13 @@ jobs:
           echo "Review responses on this PR today: $used / $CAP"
           if [ "$used" -ge "$CAP" ]; then
             echo "allowed=false" >> "$GITHUB_OUTPUT"
-            # Say so once, on the run that hits the cap, not on every review after.
-            if [ "$used" -eq "$CAP" ]; then
+            # Say so once a day. Turned-away runs never raise the count, so the
+            # count cannot tell the first from the tenth; a dated marker can.
+            marker="<!-- agent-review-cap:$today -->"
+            existing="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --jq '.[].body')"
+            if ! grep -qF "$marker" <<< "$existing"; then
               gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" \
-                --body "Review auto-response cap reached for this PR today ($used/$CAP). The daily sweep picks up the rest, or raise \`AGENT_REVIEW_DAILY_CAP\`."
+                --body "Review auto-response cap reached for this PR today ($used/$CAP). The daily sweep picks up the rest, or raise \`AGENT_REVIEW_DAILY_CAP\`. $marker"
             fi
           else
             echo "allowed=true" >> "$GITHUB_OUTPUT"
@@ -143,6 +142,56 @@ jobs:
         uses: ./.github/actions/project-setup
         with:
           config-ref: origin/${{ github.event.repository.default_branch }}
+
+      # Agents never change .github/, .claude/, .env* or `protected_paths`
+      # (AGENTS.md). The fix workflow enforces that by not opening the PR; here
+      # the agent pushes to an open PR, so a pre-push hook refuses such pushes
+      # and the check after the run catches any that bypass the hook.
+      - name: Install protected-path guard
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          # Adds to the fixed list; the config cannot remove .github/, .claude/ or .env*.
+          EXTRA: ${{ steps.project.outputs.protected-pattern }}
+        run: |
+          before="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha)"
+          git fetch -q origin "$BASE" "refs/pull/$PR/head"
+          echo "before=$before" >> "$GITHUB_OUTPUT"
+          pattern='^(\.github/|\.claude/)|(^|/)\.env'
+          [ -z "$EXTRA" ] || pattern="$pattern|$EXTRA"
+
+          # Prints protected paths whose content differs between two commits of
+          # the PR. Only paths in the PR's own diff (three-dot) count, so
+          # merging the base branch in never trips it.
+          check="$RUNNER_TEMP/protected-changes.sh"
+          cat > "$check" <<EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          old="\$1" new="\$2"
+          git diff --no-renames --name-only "origin/$BASE...\$new" | grep -E '$pattern' | while read -r f; do
+            git diff --quiet "\$old" "\$new" -- "\$f" || echo "\$f"
+          done || true
+          EOF
+          chmod +x "$check"
+          echo "check=$check" >> "$GITHUB_OUTPUT"
+
+          cat > .git/hooks/pre-push <<EOF
+          #!/usr/bin/env bash
+          while read -r _ local_sha _ remote_sha; do
+            [ "\$local_sha" = 0000000000000000000000000000000000000000 ] && continue
+            old="\$remote_sha"
+            [ "\$old" = 0000000000000000000000000000000000000000 ] && old="$before"
+            hits="\$("$check" "\$old" "\$local_sha")"
+            if [ -n "\$hits" ]; then
+              echo "Refusing to push changes to protected paths; a human makes these:" >&2
+              echo "\$hits" >&2
+              exit 1
+            fi
+          done
+          EOF
+          chmod +x .git/hooks/pre-push
 
       - name: Run review sweep on this PR
         id: claude
@@ -178,6 +227,27 @@ jobs:
             --max-turns ${{ vars.AGENT_MAX_TURNS_REVIEW || '30' }}
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Skill,Bash(gh pr:*),Bash(gh api:*),Bash(gh run:*),${{ steps.project.outputs.allowed-bash }},Bash(git:*)"
             --disallowedTools "WebFetch,WebSearch"
+
+      - name: Check for protected-path changes
+        if: always() && steps.guard.outputs.before != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ steps.guard.outputs.before }}
+          CHECK: ${{ steps.guard.outputs.check }}
+        run: |
+          git fetch -q origin "refs/pull/$PR/head"
+          after="$(git rev-parse FETCH_HEAD)"
+          [ "$after" != "$BEFORE" ] || exit 0
+          hits="$("$CHECK" "$BEFORE" "$after")"
+          [ -n "$hits" ] || exit 0
+          # Back to draft so it cannot merge until a human looks.
+          gh pr ready "$PR" --repo "$GITHUB_REPOSITORY" --undo || true
+          gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label agent:needs-human || true
+          printf 'The review agent pushed changes to protected paths, which only a human may change. The PR is back in draft.\n\n```\n%s\n```\n' \
+            "$hits" | gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file -
+          echo "::error::Agent changed protected paths: $hits"
+          exit 1
 
       - name: Report cost
         if: always() && steps.claude.outputs.execution_file != ''
