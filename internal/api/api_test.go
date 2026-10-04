@@ -156,3 +156,21 @@ func TestUnmatchedRoutesReturnJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestAsteriskFormReturnsJSON400(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RequestURI = "*"
+	rec := httptest.NewRecorder()
+	New(store.New(), log).ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d %s; want 400", rec.Code, rec.Body)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	var e errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil || e.Error == "" {
+		t.Fatalf("body %q is not an error object", rec.Body)
+	}
+}

@@ -34,6 +34,12 @@ func New(s *store.Store, log *slog.Logger) http.Handler {
 // the request. The 405 keeps the Allow header the mux computed.
 func jsonMuxErrors(mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Handler would canonicalize "*" into a redirect; the mux itself
+		// answers asterisk-form requests with 400.
+		if r.RequestURI == "*" {
+			writeError(w, http.StatusBadRequest, "bad request")
+			return
+		}
 		h, pattern := mux.Handler(r)
 		if pattern != "" {
 			// ServeHTTP, not h: only the mux populates r.PathValue.
