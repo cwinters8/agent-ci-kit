@@ -47,15 +47,20 @@ The sample app (replace with yours)
      own account (GitHub has no repo-owned tokens), limited to this repo only.
      Permissions: Contents and Pull requests read/write; add Issues read/write
      and Actions read-only if you use the daily review sweep. The workflow opens
-     agent PRs with it. The built-in `GITHUB_TOKEN` can't stand in: GitHub
-     blocks Actions from creating PRs by default, and PRs it does open trigger
-     no CI. If the PR step fails anyway, the workflow comments a link on the
-     issue so you can open the PR by hand.
+     agent PRs with it. The built-in `GITHUB_TOKEN` is not a drop-in
+     replacement: GitHub blocks Actions from creating PRs unless you turn on
+     "Allow GitHub Actions to create and approve pull requests", and even then
+     CI on those PRs waits until someone clicks "Approve workflows to run". If
+     you accept that manual step, enable the setting and point the "Open draft
+     PR" step at `github.token`. If the PR step fails, the workflow comments a
+     link on the issue so you can open the PR by hand.
 4. Create labels: `agent:fix`, `agent:fix-opus`, `agent:needs-human`, `agent:large-diff`.
 5. Protect `main`: require a pull request, but **not** an approving review.
    Agent PRs are opened with your PAT, so GitHub lists you as the author, and
-   you cannot approve your own PR. To keep required approvals, open PRs with a
-   GitHub App token or a second account instead.
+   you cannot approve your own PR. To keep required approvals, put a second
+   (bot) account's PAT in `AGENT_PR_TOKEN`, or use your own GitHub App and mint
+   its token in the workflow with `actions/create-github-app-token`. App tokens
+   expire after an hour, so one pasted into the secret stops working.
 6. Open a bug with the "Bug for the agent" template and label it `agent:fix`.
 
 Locally: `make check` runs exactly what CI and the agents run. `make run`

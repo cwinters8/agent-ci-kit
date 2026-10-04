@@ -17,16 +17,17 @@
 #      And, required:
 #        AGENT_PR_TOKEN  fine-grained PAT on your account, limited to this
 #                        repo (Contents + Pull requests read/write). The
-#                        workflow opens the PR with it. GITHUB_TOKEN will not
-#                        do: GitHub refuses PRs from Actions unless "Allow
-#                        GitHub Actions to create and approve pull requests"
-#                        is on (it is off by default), and a PR it does open
-#                        triggers none of your other workflows, so CI never
-#                        runs. The Claude App token cannot be used either: the
-#                        action revokes it when its step ends. PRs the PAT
+#                        workflow opens the PR with it. GITHUB_TOKEN is not
+#                        a drop-in: GitHub refuses PRs from Actions unless
+#                        "Allow GitHub Actions to create and approve pull
+#                        requests" is on (off by default), and CI on a PR it
+#                        opens waits for someone to click "Approve workflows
+#                        to run". The Claude App token cannot be used either:
+#                        the action revokes it when its step ends. PRs the PAT
 #                        opens list you as author, so you cannot approve them
 #                        yourself; don't require approvals on main, or use a
-#                        GitHub App token instead.
+#                        second account's PAT or a GitHub App token minted per
+#                        run (actions/create-github-app-token).
 #   3. Optional repo variables (Settings -> Variables), defaults in brackets:
 #        AGENT_DAILY_RUN_CAP [10]   max agent runs per UTC day
 #        AGENT_MAX_TURNS_SONNET [30], AGENT_MAX_TURNS_OPUS [40]
@@ -221,7 +222,7 @@ jobs:
         id: open_pr
         if: steps.guard.outputs.pushed == 'true' && steps.guard.outputs.blocked == 'false'
         env:
-          # Must be the PAT. See setup step 2 for why GITHUB_TOKEN fails here.
+          # The PAT, so CI runs unattended on the PR. See setup step 2.
           GH_TOKEN: ${{ secrets.AGENT_PR_TOKEN }}
           BRANCH: ${{ steps.claude.outputs.branch_name }}
           BASE: ${{ github.event.repository.default_branch }}
