@@ -203,6 +203,14 @@ out="$(run_doctor "$dir")"
 expect "doctor: filters apply in order, so a later pattern can re-include a path" "$out" \
   "+pr-checks.yml paths: filter misses 1 of your node files (e.g. generated/b.js)"
 
+dir="$(node_repo no-toolchain)"
+mkdir -p "$dir/crates" && echo 'fn main() {}' > "$dir/crates/main.rs"
+jq '.toolchain = {}' "$dir/.claude/agent-ci.json" > "$dir/cfg" && mv "$dir/cfg" "$dir/.claude/agent-ci.json"
+git -C "$dir" add -A
+out="$(run_doctor "$dir")"
+expect "doctor: with an empty toolchain, every known source file must trigger pr-checks" "$out" \
+  "+pr-checks.yml paths: filter misses 1 of your source files (e.g. crates/main.rs)"
+
 dir="$(node_repo lockfile)"
 sed -e "s#- 'package\*.json'#- package.json#" "$dir/.github/workflows/pr-checks.yml" > "$dir/w" \
   && mv "$dir/w" "$dir/.github/workflows/pr-checks.yml"
@@ -301,6 +309,14 @@ out="$(github_doctor "$repo_dir" "$gh_dir")"
 expect "doctor: classic branch protection with code owner review passes" "$out" \
   "+✓ main requires a code owner's approval (branch protection)" "-keeps an approval"
 
+gh_dir="$(github_ok classic-app-bypass)"
+echo '[]' > "$gh_dir/repos_acme_app_rules_branches_main.json"
+echo '{"required_pull_request_reviews": {"required_approving_review_count": 1, "require_code_owner_reviews": true, "require_last_push_approval": true, "bypass_pull_request_allowances": {"users": [], "teams": [], "apps": [{"slug": "claude"}]}}}' \
+  > "$gh_dir/repos_acme_app_branches_main_protection.json"
+out="$(github_doctor "$repo_dir" "$gh_dir")"
+expect "doctor: branch protection an app can bypass fails" "$out" \
+  "+✗ main branch protection lets these apps skip the pull request rule: claude"
+
 gh_dir="$(github_ok app-bypass)"
 echo '{"bypass_actors": [{"actor_type": "Integration", "actor_id": 1234, "bypass_mode": "always"}]}' \
   > "$gh_dir/repos_acme_app_rulesets_7.json"
@@ -317,6 +333,13 @@ dir="$(node_repo no-codeowners)"
 rm "$dir/.github/CODEOWNERS"
 out="$(run_doctor "$dir")"
 expect "doctor: a missing CODEOWNERS fails" "$out" "+✗ .github/CODEOWNERS missing"
+
+gh_dir="$(github_ok big-workflow)"
+echo '{"secrets": [{"name": "ANTHROPIC_API_KEY"}]}' > "$gh_dir/repos_acme_app_actions_secrets.json"
+dir="$(node_repo big-workflow)"
+{ printf '# '; head -c 2000000 /dev/zero | tr '\0' x; echo; } >> "$dir/.github/workflows/claude-fix-issue.yml"
+out="$(github_doctor "$dir" "$gh_dir")"
+expect "doctor: large workflow files still count as using AGENT_PR_TOKEN" "$out" "+✗ no AGENT_PR_TOKEN secret"
 
 gh_dir="$(github_ok claude-only)"
 echo '{"secrets": [{"name": "ANTHROPIC_API_KEY"}]}' > "$gh_dir/repos_acme_app_actions_secrets.json"

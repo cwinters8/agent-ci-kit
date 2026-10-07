@@ -26,7 +26,12 @@ skills=(action-versions code-review pr-preflight review-sweep security-review)
 has() { [ -f ".github/workflows/$1.yml" ]; }  # is this kit workflow installed?
 # Does any installed workflow mention $1? Decides which secrets and labels
 # GitHub needs, so doctor follows the workflows rather than a fixed list.
-workflows_use() { cat .github/workflows/*.yml 2> /dev/null | grep -qF -- "$1"; }
+# Captured first: `cat | grep -q` would close the pipe early and trip pipefail.
+workflows_use() {
+  local text
+  text="$(cat .github/workflows/*.yml 2> /dev/null || true)"
+  grep -qF -- "$1" <<< "$text"
+}
 codeowners=""
 for f in .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS; do
   [ -f "$f" ] && { codeowners="$f"; break; }
@@ -179,6 +184,16 @@ stack_files() {
     go) git ls-files -- '*.go' ;;
     node) git ls-files -- '*.js' '*.mjs' '*.cjs' '*.jsx' '*.ts' '*.mts' '*.cts' '*.tsx' '*.vue' '*.svelte' ;;
     python) git ls-files -- '*.py' ;;
+    # For `"toolchain": {}`, where the runner image has the runtime: any
+    # language doctor knows.
+    any)
+      stack_files go
+      stack_files node
+      stack_files python
+      git ls-files -- '*.rs' '*.rb' '*.java' '*.kt' '*.kts' '*.scala' '*.swift' '*.cs' '*.fs' \
+        '*.php' '*.c' '*.h' '*.cc' '*.cpp' '*.hpp' '*.m' '*.mm' '*.ex' '*.exs' '*.erl' '*.clj' \
+        '*.dart' '*.lua' '*.zig' '*.hs' '*.ml' '*.jl' '*.r' '*.R' '*.pl' '*.groovy'
+      ;;
   esac
 }
 go_files="$(stack_files go)"
@@ -229,9 +244,18 @@ check_triggers() {
 # and to anything else that changes what the checks do: the kit config, the
 # setup action, the workflow itself and the dependency files.
 if [ -f .github/workflows/pr-checks.yml ] && [ -f "$cfg" ]; then
-  for stack in $(jq -r '.toolchain // {} | keys[]' "$cfg" 2> /dev/null); do
+  stacks="$(jq -r '.toolchain // {} | keys[]' "$cfg" 2> /dev/null || true)"
+  for stack in $stacks; do
     check_triggers pr-checks "$stack files" "$(stack_files "$stack")"
   done
+  if [ -z "$stacks" ]; then
+    src="$(stack_files any)"
+    if [ -n "$src" ]; then
+      check_triggers pr-checks "source files" "$src"
+    else
+      warn "no source files in a language doctor knows; check that pr-checks.yml paths: covers yours"
+    fi
+  fi
   check_triggers pr-checks "config, setup and dependency files" "$(
     find "$cfg" .github/workflows/pr-checks.yml .github/actions/project-setup -type f 2> /dev/null
     jq -r '.dependency_files | arrays | .[] | strings' "$cfg" 2> /dev/null | while IFS= read -r df; do
@@ -377,7 +401,8 @@ else
     via="branch protection"
     gate="$(gh api "repos/$repo/branches/$default/protection" --jq '.required_pull_request_reviews // empty
       | {required_approving_review_count, require_code_owner_review: .require_code_owner_reviews,
-         dismiss_stale_reviews_on_push: .dismiss_stale_reviews, require_last_push_approval}' 2> /dev/null || true)"
+         dismiss_stale_reviews_on_push: .dismiss_stale_reviews, require_last_push_approval,
+         bypass_apps: [.bypass_pull_request_allowances.apps // [] | .[] | .slug]}' 2> /dev/null || true)"
   fi
   if [ -z "$gate" ]; then
     fail "$default does not require a pull request; set up the ruleset in README Quickstart step 5 (private repos need GitHub Pro or a paid org)"
@@ -387,6 +412,10 @@ else
     ok "$default requires a code owner's approval ($via)"
     if ! jq -e '.dismiss_stale_reviews_on_push == true or .require_last_push_approval == true' <<< "$gate" > /dev/null; then
       fail "$default keeps an approval after new pushes, so an agent push after your approval needs no review; turn on \"Require approval of the most recent reviewable push\""
+    fi
+    apps="$(jq -r '.bypass_apps // [] | join(", ")' <<< "$gate")"
+    if [ -n "$apps" ]; then
+      fail "$default branch protection lets these apps skip the pull request rule: $apps; an agent acting as one could merge. Remove them"
     fi
     id="$(jq -r '.ruleset_id // empty' <<< "$gate")"
     if [ -n "$id" ] && bypass="$(gh api "repos/$repo/rulesets/$id" --jq '.bypass_actors // empty' 2> /dev/null)" && [ -n "$bypass" ]; then
