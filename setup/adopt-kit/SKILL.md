@@ -180,7 +180,8 @@ Fill in:
   or the team they name. Never the kit author's handle, and never an account
   or app the agents run as: code owner review is what stops an agent merging
   its own PR. If they already have a CODEOWNERS, keep it and make sure every
-  path has a human owner.
+  path has a human owner: add a catch-all `* @<their handle>` as its first
+  rule if it has none (doctor fails without one).
 - **`.claude/agent-ci.json`** from the survey, field by field against the
   schema. Every command you name is on the agents' allowlist, so name only
   what an agent should be able to run. `jq empty` must pass.

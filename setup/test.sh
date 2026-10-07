@@ -182,14 +182,15 @@ expect "doctor: every source directory must be covered, not just one" "$out" \
 dir="$(node_repo image-inputs)"
 mkdir -p "$dir/assets" && echo logo > "$dir/assets/logo.txt"
 printf 'FROM scratch\nCOPY src assets /\n' > "$dir/Dockerfile"
-jq '.image = {"inputs": ["src", "assets", "Dockerfile", "web"]}' "$dir/.claude/agent-ci.json" > "$dir/cfg" && mv "$dir/cfg" "$dir/.claude/agent-ci.json"
+jq '.image = {"inputs": ["src", "assets", "web"]}' "$dir/.claude/agent-ci.json" > "$dir/cfg" && mv "$dir/cfg" "$dir/.claude/agent-ci.json"
 sed -e "s#- '\*\*\.go'#- 'src/**'#" -e '/- go\.mod/d' -e '/- go\.sum/d' \
   "$kit/.github/workflows/build-image.yml" > "$dir/.github/workflows/build-image.yml"
 git -C "$dir" add -A
 out="$(run_doctor "$dir")"
 expect "doctor: build-image.yml must fire for every image input" "$out" \
   "+build-image.yml paths: filter misses 1 of your image input files (e.g. assets/logo.txt)" "-src/x.js" \
-  "+✗ image.inputs entry web matches no files" "-entry src matches" "-entry Dockerfile matches"
+  "+✗ image.inputs entry web matches no files" "-entry src matches" \
+  "+✗ image.inputs does not select Dockerfile"
 
 dir="$(node_repo reinclude)"
 mkdir -p "$dir/generated/checked"
@@ -210,6 +211,19 @@ git -C "$dir" add -A
 out="$(run_doctor "$dir")"
 expect "doctor: with an empty toolchain, every known source file must trigger pr-checks" "$out" \
   "+pr-checks.yml paths: filter misses 1 of your source files (e.g. crates/main.rs)"
+
+dir="$(node_repo optional-char)"
+echo 'export const y = 1;' > "$dir/src/x1.js"
+sed -e "s#- 'src/\*\*'#- 'src/xy?.js'#" "$dir/.github/workflows/pr-checks.yml" > "$dir/w" && mv "$dir/w" "$dir/.github/workflows/pr-checks.yml"
+git -C "$dir" add -A
+out="$(run_doctor "$dir")"
+expect "doctor: ? in a filter makes the preceding character optional, as on GitHub" "$out" \
+  "+pr-checks.yml paths: filter misses 1 of your node files (e.g. src/x1.js)"
+
+dir="$(node_repo partial-owners)"
+echo '/docs/ @acme' > "$dir/.github/CODEOWNERS"
+out="$(run_doctor "$dir")"
+expect "doctor: CODEOWNERS without a catch-all owner fails" "$out" "+✗ .github/CODEOWNERS has no catch-all owner"
 
 dir="$(node_repo lockfile)"
 sed -e "s#- 'package\*.json'#- package.json#" "$dir/.github/workflows/pr-checks.yml" > "$dir/w" \

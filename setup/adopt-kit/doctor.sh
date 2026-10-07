@@ -78,6 +78,8 @@ if [ -z "$codeowners" ]; then
   fail ".github/CODEOWNERS missing; the merge gate's code owner review has no one to require"
 elif ! grep -qE '^[^#]*@' "$codeowners"; then
   fail "$codeowners names no owner; the merge gate's code owner review has no one to require"
+elif ! grep -qE '^[[:space:]]*(\*|/?\*\*(/\*)?)[[:space:]]+[^#[:space:]]*@' "$codeowners"; then
+  fail "$codeowners has no catch-all owner, so a PR touching only unowned files needs no code owner review; add \"* @you\" as its first rule"
 fi
 if [ -f CLAUDE.md ] && ! grep -q '@AGENTS.md' CLAUDE.md; then
   warn "CLAUDE.md does not import @AGENTS.md; Claude Code may not read the agent rules"
@@ -169,12 +171,13 @@ fi
 path_filters() {
   awk '/^ *paths:/ { on = 1; next } on && /^ *(#|$)/ { next } on && /^ *- / { sub(/^ *- */, ""); gsub(/["'"'"']/, ""); print; next } on { exit }' "$1"
 }
-# A GitHub `paths:` glob as an ERE: `**` spans directories, `*` and `?` stay
-# within one.
+# A GitHub `paths:` glob as an ERE, per GitHub's filter cheat sheet: `**`
+# spans directories, `*` stays within one, `?` and `+` make the preceding
+# character optional or repeatable, and `[...]` is a character class.
 glob_re() {
   # shellcheck disable=SC2016 # the $ is a literal regex character
-  sed -e 's/[].+^$(){}|\\[]/\\&/g' -e 's#\*\*/#%DS%#g' -e 's#\*\*#%D%#g' \
-    -e 's#\*#[^/]*#g' -e 's#?#[^/]#g' -e 's#%DS%#(.*/)?#g' -e 's#%D%#.*#g' \
+  sed -e 's/[.^$(){}|\\]/\\&/g' -e 's#\*\*/#%DS%#g' -e 's#\*\*#%D%#g' \
+    -e 's#\*#[^/]*#g' -e 's#%DS%#(.*/)?#g' -e 's#%D%#.*#g' \
     -e 's#^#^#' -e 's#$#$#' <<< "$1"
 }
 # Tracked source files per toolchain, captured whole: `git ls-files | grep -q`
@@ -282,8 +285,12 @@ if [ -f .github/workflows/build-image.yml ]; then
       fi
     done < <(jq -r '.image.inputs // [] | .[]' "$cfg" 2> /dev/null)
     if [ "${#inputs[@]}" -gt 0 ]; then
-      check_triggers build-image "image input files" \
-        "$(git ls-files --cached --others --exclude-standard -- "${inputs[@]}" 2> /dev/null || true)"
+      selected="$(git ls-files --cached --others --exclude-standard -- "${inputs[@]}" 2> /dev/null || true)"
+      # The Dockerfile shapes the image, so it belongs in the hash.
+      if ! grep -qxF -- "${dockerfile#./}" <<< "$selected"; then
+        fail "image.inputs does not select $dockerfile, so a change to it would reuse the old image"; leftover=1
+      fi
+      check_triggers build-image "image input files" "$selected"
     fi
   fi
 fi
