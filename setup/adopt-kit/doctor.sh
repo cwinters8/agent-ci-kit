@@ -80,6 +80,15 @@ elif ! grep -qE '^[^#]*@' "$codeowners"; then
   fail "$codeowners names no owner; the merge gate's code owner review has no one to require"
 elif ! grep -qE '^[[:space:]]*(\*|/?\*\*(/\*)?)[[:space:]]+[^#[:space:]]*@' "$codeowners"; then
   fail "$codeowners has no catch-all owner, so a PR touching only unowned files needs no code owner review; add \"* @you\" as its first rule"
+else
+  # The last matching rule wins, so a rule with no owner after the catch-all
+  # takes those paths out of code owner review.
+  ownerless="$(awk '{ sub(/#.*/, "") } NF == 0 { next }
+    $1 ~ /^(\*|\/?\*\*(\/\*)?)$/ && NF > 1 { catchall = 1; next }
+    catchall && NF == 1 { print $1 }' "$codeowners")"
+  if [ -n "$ownerless" ]; then
+    fail "$codeowners has a rule with no owner after the catch-all ($(head -n 1 <<< "$ownerless")), so changes there need no code owner review; give it an owner"
+  fi
 fi
 if [ -f CLAUDE.md ] && ! grep -q '@AGENTS.md' CLAUDE.md; then
   warn "CLAUDE.md does not import @AGENTS.md; Claude Code may not read the agent rules"

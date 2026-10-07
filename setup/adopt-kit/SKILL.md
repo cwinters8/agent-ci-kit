@@ -171,6 +171,8 @@ Merge rules for files that already exist:
   hooks; keep everything else.
 - A workflow with the same file name: stop and ask. Do not rename or merge
   CI files on your own.
+- `.claude/hooks/session-start.sh`: if they have one, stop and ask; it
+  bootstraps their cloud sessions, and the kit's copy would replace it.
 - `.claude/skills/`: keep every skill they have. A kit skill whose directory
   name they already use: stop and ask.
 - `.claude/skills.json`: if they have one, stop and ask; it is the manifest

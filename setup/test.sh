@@ -241,6 +241,12 @@ echo '/docs/ @acme' > "$dir/.github/CODEOWNERS"
 out="$(run_doctor "$dir")"
 expect "doctor: CODEOWNERS without a catch-all owner fails" "$out" "+✗ .github/CODEOWNERS has no catch-all owner"
 
+dir="$(node_repo ownerless-rule)"
+printf '* @acme\n/apps/github\n' > "$dir/.github/CODEOWNERS"
+out="$(run_doctor "$dir")"
+expect "doctor: a rule with no owner after the catch-all fails" "$out" \
+  "+✗ .github/CODEOWNERS has a rule with no owner after the catch-all (/apps/github)"
+
 dir="$(node_repo lockfile)"
 sed -e "s#- 'package\*.json'#- package.json#" "$dir/.github/workflows/pr-checks.yml" > "$dir/w" \
   && mv "$dir/w" "$dir/.github/workflows/pr-checks.yml"
