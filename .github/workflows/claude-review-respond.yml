@@ -238,19 +238,26 @@ jobs:
           GUARD: ${{ steps.guard.outputs.dir }}
           PROTECTED_EXTRA: ${{ steps.project.outputs.protected-pattern }}
         run: |
-          git fetch -q origin "refs/pull/$PR/head"
-          after="$(git rev-parse FETCH_HEAD)"
-          [ "$after" != "$BEFORE" ] || exit 0
-          # A failed check counts as a hit: fail closed.
-          hits="$("$GUARD/check" "$(cat "$GUARD/base")" "$BEFORE" "$after" 2>&1)" \
-            || hits="protected-path check failed: $hits"
+          # The action revokes its token and leaves it in origin's URL, so
+          # authenticate this fetch with the job token on a clean URL.
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          # A failed fetch or check counts as a hit: fail closed.
+          if git -c "http.$GITHUB_SERVER_URL/.extraheader=$auth" \
+              fetch -q "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "refs/pull/$PR/head"; then
+            after="$(git rev-parse FETCH_HEAD)"
+            [ "$after" != "$BEFORE" ] || exit 0
+            hits="$("$GUARD/check" "$(cat "$GUARD/base")" "$BEFORE" "$after" 2>&1)" \
+              || hits="protected-path check failed: $hits"
+          else
+            hits="could not fetch the PR head to check protected paths"
+          fi
           [ -n "$hits" ] || exit 0
           # Back to draft so it cannot merge until a human looks.
           gh pr ready "$PR" --repo "$GITHUB_REPOSITORY" --undo || true
           gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label agent:needs-human || true
-          printf 'The review agent pushed changes to protected paths, which only a human may change. The PR is back in draft.\n\n```\n%s\n```\n' \
+          printf 'After the review agent ran, the protected-path check flagged this PR (only a human may change those paths). The PR is back in draft.\n\n```\n%s\n```\n' \
             "$hits" | gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file -
-          echo "::error::Agent changed protected paths: $hits"
+          echo "::error::Protected-path check flagged this PR: $hits"
           exit 1
 
       - name: Report cost
