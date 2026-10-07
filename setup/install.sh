@@ -29,7 +29,16 @@ fi
 parent="$(dirname "$dest")"
 mkdir -p "$parent"
 stage="$(mktemp -d "$parent/.adopt-kit.new.XXXXXX")"
-trap 'rm -rf "$stage"' EXIT
+old=""
+# On any exit before the swap completes, put the previous install back.
+cleanup() {
+  if [ -n "$old" ] && [ -d "$old/adopt-kit" ] && [ ! -e "$dest" ]; then
+    mv "$old/adopt-kit" "$dest"
+  fi
+  rm -rf "$stage" ${old:+"$old"}
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
 cp -R "$src/." "$stage/"
 printf '%s\n' "$kit" > "$stage/kit-path"
 touch "$stage/.installed-by-agent-ci-kit"
@@ -43,7 +52,7 @@ if [ -e "$dest" ]; then
 else
   mv "$stage" "$dest"
 fi
-trap - EXIT
+trap - EXIT INT TERM HUP
 
 echo "Installed /adopt-kit to $dest (kit: $kit)"
 echo "Next: open Claude Code in your project's repo and run /adopt-kit"

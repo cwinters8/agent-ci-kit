@@ -125,6 +125,21 @@ else
   flunk "install: re-run"
 fi
 
+# A stand-in mv that fails the swap's second step, as an interrupt there would.
+failmv="$tmp/failmv"
+mkdir -p "$failmv"
+# shellcheck disable=SC2016 # the stand-in expands $1 and $@ itself
+printf '#!/usr/bin/env bash\ncase "$1" in *.adopt-kit.new.*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v mv)" > "$failmv/mv"
+chmod +x "$failmv/mv"
+echo keep > "$dest/old-marker"
+if ! CLAUDE_CONFIG_DIR="$cfgdir" PATH="$failmv:$PATH" bash "$kit/setup/install.sh" > /dev/null 2>&1 \
+  && [ -f "$dest/old-marker" ] && [ -z "$(find "$cfgdir/skills" -maxdepth 1 -name '.adopt-kit.*')" ]; then
+  pass "install: an update that fails mid-swap restores the previous install"
+else
+  flunk "install: interrupted swap"
+fi
+rm -f "$dest/old-marker"
+
 foreign="$tmp/foreign-config"
 mkdir -p "$foreign/skills/adopt-kit" && echo mine > "$foreign/skills/adopt-kit/SKILL.md"
 if ! CLAUDE_CONFIG_DIR="$foreign" bash "$kit/setup/install.sh" > /dev/null 2>&1 \
@@ -182,15 +197,16 @@ expect "doctor: every source directory must be covered, not just one" "$out" \
 dir="$(node_repo image-inputs)"
 mkdir -p "$dir/assets" && echo logo > "$dir/assets/logo.txt"
 printf 'FROM scratch\nCOPY src assets /\n' > "$dir/Dockerfile"
-jq '.image = {"inputs": ["src", "assets", "web"]}' "$dir/.claude/agent-ci.json" > "$dir/cfg" && mv "$dir/cfg" "$dir/.claude/agent-ci.json"
-sed -e "s#- '\*\*\.go'#- 'src/**'#" -e '/- go\.mod/d' -e '/- go\.sum/d' \
+jq '.image = {"inputs": ["src", "assets", "web"], "context": "app"}' "$dir/.claude/agent-ci.json" > "$dir/cfg" && mv "$dir/cfg" "$dir/.claude/agent-ci.json"
+sed -e "s#- '\*\*\.go'#- 'src/**'#" -e '/- go\.mod/d' -e '/- go\.sum/d' -e '/- \.claude\/agent-ci\.json/d' \
   "$kit/.github/workflows/build-image.yml" > "$dir/.github/workflows/build-image.yml"
 git -C "$dir" add -A
 out="$(run_doctor "$dir")"
 expect "doctor: build-image.yml must fire for every image input" "$out" \
   "+build-image.yml paths: filter misses 1 of your image input files (e.g. assets/logo.txt)" "-src/x.js" \
   "+✗ image.inputs entry web matches no files" "-entry src matches" \
-  "+✗ image.inputs does not select Dockerfile"
+  "+✗ image.inputs does not select Dockerfile" "+✗ image.context app is not a directory" \
+  "+build-image.yml paths: filter misses 1 of your image config files (e.g. .claude/agent-ci.json)"
 
 dir="$(node_repo reinclude)"
 mkdir -p "$dir/generated/checked"
@@ -309,6 +325,19 @@ echo '[{"type": "pull_request", "ruleset_id": 7, "parameters": {"required_approv
 out="$(github_doctor "$repo_dir" "$gh_dir")"
 expect "doctor: an approval that survives later pushes fails" "$out" \
   "+✗ main keeps an approval after new pushes"
+
+gh_dir="$(github_ok sha-pinning)"
+echo '{"enabled": true, "allowed_actions": "all", "sha_pinning_required": true}' > "$gh_dir/repos_acme_app_actions_permissions.json"
+out="$(github_doctor "$repo_dir" "$gh_dir")"
+expect "doctor: a SHA-pinning policy fails while the workflows use tags" "$out" \
+  "+✗ Actions policy requires actions pinned to a commit SHA"
+
+gh_dir="$(github_ok slash-branch)"
+echo '{"default_branch": "release/main", "visibility": "private"}' > "$gh_dir/repos_acme_app.json"
+mv "$gh_dir/repos_acme_app_rules_branches_main.json" "$gh_dir/repos_acme_app_rules_branches_release%2Fmain.json"
+out="$(github_doctor "$repo_dir" "$gh_dir")"
+expect "doctor: a default branch with a slash is one path segment" "$out" \
+  "+✓ release/main requires a code owner's approval (ruleset)"
 
 gh_dir="$(github_ok no-gate)"
 echo '[]' > "$gh_dir/repos_acme_app_rules_branches_main.json"

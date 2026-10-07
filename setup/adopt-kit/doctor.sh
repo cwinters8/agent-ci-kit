@@ -273,6 +273,13 @@ if [ -f .github/workflows/build-image.yml ]; then
   elif [ -f "$cfg" ] && ! jq -e '.image' "$cfg" > /dev/null 2>&1; then
     fail "build-image.yml is present but $cfg has no image section"; leftover=1
   else
+    context="$(jq -r '.image.context // "."' "$cfg" 2> /dev/null || echo .)"
+    case "$context" in
+      *://* | git@*) ;;
+      *) [ -d "$context" ] || { fail "image.context $context is not a directory; every image build would fail"; leftover=1; } ;;
+    esac
+    # A change to the image config or the workflow must rebuild too.
+    check_triggers build-image "image config files" "$(find "$cfg" .github/workflows/build-image.yml -type f 2> /dev/null)"
     # build-image.yml must run for a change to anything that goes into the image.
     # Untracked files count too: doctor runs before the setup commit.
     inputs=()
@@ -314,17 +321,21 @@ else
     warn "repo is public: read docs/GUARDRAILS.md 'Before enabling on a public repo'"
   fi
 
+  # Every non-local action the installed workflows use, as owner/repo@ref.
+  used="$(cat .github/workflows/*.yml .github/actions/*/action.yml 2> /dev/null \
+    | sed -nE 's/^[[:space:]-]*uses:[[:space:]]*([^[:space:]#]+).*/\1/p' | grep -v '^\.' | sort -u || true)"
   if perms="$(gh api "repos/$repo/actions/permissions" 2> /dev/null)"; then
     allowed="$(jq -r '.allowed_actions // "all"' <<< "$perms")"
+    unpinned="$(grep -vE '@[0-9a-f]{40}$' <<< "$used" | grep . || true)"
+    if [ "$(jq -r '.sha_pinning_required // false' <<< "$perms")" = true ] && [ -n "$unpinned" ]; then
+      fail "Actions policy requires actions pinned to a commit SHA, but the workflows use tags ($(head -n 1 <<< "$unpinned"), $(grep -c . <<< "$unpinned") in all); pin them or turn the policy off"
+    fi
     if [ "$(jq -r .enabled <<< "$perms")" != true ]; then
       fail "GitHub Actions is disabled for this repo"
     elif [ "$allowed" = local_only ]; then
       fail "Actions policy allows only local actions; the kit needs anthropics/claude-code-action and others"
     elif [ "$allowed" = selected ]; then
       if sel="$(gh api "repos/$repo/actions/permissions/selected-actions" 2> /dev/null)"; then
-        # Every non-local action the installed workflows use, as owner/repo@ref.
-        used="$(cat .github/workflows/*.yml .github/actions/*/action.yml 2> /dev/null \
-          | sed -nE 's/^[[:space:]-]*uses:[[:space:]]*([^[:space:]#]+).*/\1/p' | grep -v '^\.' | sort -u || true)"
         blocked=()
         while IFS= read -r a; do
           [ -n "$a" ] || continue
@@ -398,7 +409,9 @@ else
   # its own work, whatever commands it manages to run. Rulesets first
   # (readable without admin), then classic branch protection.
   owner="${repo%%/*}"
-  rules="$(gh api "repos/$repo/rules/branches/$default" 2> /dev/null || echo '[]')"
+  # One path segment, even for a branch like release/main.
+  branch="$(jq -rn --arg b "$default" '$b | @uri')"
+  rules="$(gh api "repos/$repo/rules/branches/$branch" 2> /dev/null || echo '[]')"
   gate="$(jq -c 'def strong: (.required_approving_review_count // 0) >= 1 and .require_code_owner_review == true;
     def fresh: .dismiss_stale_reviews_on_push == true or .require_last_push_approval == true;
     [.[] | select(.type == "pull_request") | .parameters + {ruleset_id: .ruleset_id}]
@@ -406,7 +419,7 @@ else
   via=ruleset
   if [ -z "$gate" ]; then
     via="branch protection"
-    gate="$(gh api "repos/$repo/branches/$default/protection" --jq '.required_pull_request_reviews // empty
+    gate="$(gh api "repos/$repo/branches/$branch/protection" --jq '.required_pull_request_reviews // empty
       | {required_approving_review_count, require_code_owner_review: .require_code_owner_reviews,
          dismiss_stale_reviews_on_push: .dismiss_stale_reviews, require_last_push_approval,
          bypass_apps: [.bypass_pull_request_allowances.apps // [] | .[] | .slug]}' 2> /dev/null || true)"
@@ -438,14 +451,14 @@ else
     fail "$codeowners still names the kit's author (@cwinters8); put your handle or team there"
   fi
   if [ -n "$codeowners" ]; then
-    if ! gh api "repos/$repo/contents/$codeowners?ref=$default" > /dev/null 2>&1; then
+    if ! gh api "repos/$repo/contents/$codeowners?ref=$branch" > /dev/null 2>&1; then
       warn "$codeowners is not on $default yet; code owner review takes effect once the setup PR merges"
-    elif errs="$(gh api "repos/$repo/codeowners/errors?ref=$default" --jq '.errors[] | "line \(.line): \(.message)"' 2> /dev/null)" && [ -n "$errs" ]; then
+    elif errs="$(gh api "repos/$repo/codeowners/errors?ref=$branch" --jq '.errors[] | "line \(.line): \(.message)"' 2> /dev/null)" && [ -n "$errs" ]; then
       fail "GitHub rejects $codeowners: $(head -n 1 <<< "$errs")"
     fi
   fi
 
-  if gh api "repos/$repo/contents/$cfg?ref=$default" > /dev/null 2>&1; then
+  if gh api "repos/$repo/contents/$cfg?ref=$branch" > /dev/null 2>&1; then
     ok "kit config is on $default"
   else
     warn "$cfg is not on $default yet; agent workflows read it from there, so merge the setup PR first"

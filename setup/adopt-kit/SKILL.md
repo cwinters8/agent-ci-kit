@@ -22,7 +22,8 @@ work and keep questions few. The finished state:
 - **The kit is the source of truth, not this file.** Before writing the
   config, read `$KIT/docs/PROJECT-CONFIG.md` and
   `$KIT/.claude/agent-ci.schema.json`. Before the GitHub steps, read
-  `$KIT/README.md`. If they disagree with this skill, they win.
+  `$KIT/README.md`. If they disagree with this skill, they win, except on
+  the merge gate in step 5: there, use whichever is stricter.
 - **Never ask for a secret in the conversation.** Not a token, not an API key,
   not "paste it here and I'll set it". The user sets secrets themselves with
   `gh secret set` in their own terminal.
@@ -147,7 +148,8 @@ Copy from `$KIT`, keeping paths:
 - `.github/actions/project-setup/`, and `.github/scripts/` if the kit has it
   (scripts the agent workflows call)
 - `.github/ISSUE_TEMPLATE/agent-fix.yml`, with the fix workflow
-- `.github/CODEOWNERS`: rewritten below
+- `.github/CODEOWNERS`: rewritten below, only if they have no CODEOWNERS
+  (GitHub reads only the first of `.github/`, the root and `docs/`)
 - `.claude/skills/` and `.claude/skills.json` (vendored; copy as is, but
   see the merge rules)
 - `.claude/hooks/session-start.sh`, `.claude/settings.json`
@@ -179,9 +181,10 @@ Fill in:
 - **`.github/CODEOWNERS`**: `* @<their handle>` (`gh api user --jq .login`),
   or the team they name. Never the kit author's handle, and never an account
   or app the agents run as: code owner review is what stops an agent merging
-  its own PR. If they already have a CODEOWNERS, keep it and make sure every
-  path has a human owner: add a catch-all `* @<their handle>` as its first
-  rule if it has none (doctor fails without one).
+  its own PR. If they already have a CODEOWNERS, edit that file in place
+  rather than adding `.github/CODEOWNERS`, which would hide it, and make
+  sure every path has a human owner: add a catch-all `* @<their handle>` as
+  its first rule if it has none (doctor fails without one).
 - **`.claude/agent-ci.json`** from the survey, field by field against the
   schema. Every command you name is on the agents' allowlist, so name only
   what an agent should be able to run. `jq empty` must pass.
