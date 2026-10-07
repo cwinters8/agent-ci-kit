@@ -57,7 +57,7 @@ EOF
     printf '# Project profile\n\n## Repo\n\nPublic repo.\n' > .claude/project-profile.md
     echo '* @acme' > .github/CODEOWNERS
     rm .github/workflows/build-image.yml
-    sed -e "s#- '\*\*\.go'#- 'src/**'#" -e '/- go\.mod/d' -e '/- go\.sum/d' -e 's#- Makefile#- package.json#' \
+    sed -e "s#- '\*\*\.go'#- 'src/**'#" -e '/- go\.mod/d' -e '/- go\.sum/d' -e "s#- Makefile#- 'package*.json'#" \
       .github/workflows/pr-checks.yml > pr-checks.tmp && mv pr-checks.tmp .github/workflows/pr-checks.yml
     git add -A
   )
@@ -97,7 +97,7 @@ github_ok() {
   echo '{"enabled": true, "allowed_actions": "all"}' > "$d/repos_acme_app_actions_permissions.json"
   echo '{"secrets": [{"name": "CLAUDE_CODE_OAUTH_TOKEN"}, {"name": "AGENT_PR_TOKEN"}]}' > "$d/repos_acme_app_actions_secrets.json"
   echo '[{"name": "agent:fix"}, {"name": "agent:fix-opus"}, {"name": "agent:needs-human"}, {"name": "agent:large-diff"}]' > "$d/repos_acme_app_labels.json"
-  echo '[{"type": "pull_request", "ruleset_id": 7, "parameters": {"required_approving_review_count": 1, "require_code_owner_review": true}}]' > "$d/repos_acme_app_rules_branches_main.json"
+  echo '[{"type": "pull_request", "ruleset_id": 7, "parameters": {"required_approving_review_count": 1, "require_code_owner_review": true, "require_last_push_approval": true}}]' > "$d/repos_acme_app_rules_branches_main.json"
   echo '{"bypass_actors": [{"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"}]}' > "$d/repos_acme_app_rulesets_7.json"
   echo '{}' > "$d/repos_acme_app_contents_.claude_agent-ci.json.json"
   echo '{}' > "$d/repos_acme_app_contents_.github_CODEOWNERS.json"
@@ -182,13 +182,33 @@ expect "doctor: every source directory must be covered, not just one" "$out" \
 dir="$(node_repo image-inputs)"
 mkdir -p "$dir/assets" && echo logo > "$dir/assets/logo.txt"
 printf 'FROM scratch\nCOPY src assets /\n' > "$dir/Dockerfile"
-jq '.image = {"inputs": ["src", "assets", "Dockerfile"]}' "$dir/.claude/agent-ci.json" > "$dir/cfg" && mv "$dir/cfg" "$dir/.claude/agent-ci.json"
+jq '.image = {"inputs": ["src", "assets", "Dockerfile", "web"]}' "$dir/.claude/agent-ci.json" > "$dir/cfg" && mv "$dir/cfg" "$dir/.claude/agent-ci.json"
 sed -e "s#- '\*\*\.go'#- 'src/**'#" -e '/- go\.mod/d' -e '/- go\.sum/d' \
   "$kit/.github/workflows/build-image.yml" > "$dir/.github/workflows/build-image.yml"
 git -C "$dir" add -A
 out="$(run_doctor "$dir")"
 expect "doctor: build-image.yml must fire for every image input" "$out" \
-  "+build-image.yml paths: filter misses 1 of your image input files (e.g. assets/logo.txt)" "-src/x.js"
+  "+build-image.yml paths: filter misses 1 of your image input files (e.g. assets/logo.txt)" "-src/x.js" \
+  "+✗ image.inputs entry web matches no files" "-entry src matches" "-entry Dockerfile matches"
+
+dir="$(node_repo reinclude)"
+mkdir -p "$dir/generated/checked"
+echo 'export const a = 1;' > "$dir/generated/checked/a.js"
+echo 'export const b = 1;' > "$dir/generated/b.js"
+sed -e "s#- 'src/\*\*'#- '**'\\
+      - '!generated/**'\\
+      - 'generated/checked/**'#" "$dir/.github/workflows/pr-checks.yml" > "$dir/w" && mv "$dir/w" "$dir/.github/workflows/pr-checks.yml"
+git -C "$dir" add -A
+out="$(run_doctor "$dir")"
+expect "doctor: filters apply in order, so a later pattern can re-include a path" "$out" \
+  "+pr-checks.yml paths: filter misses 1 of your node files (e.g. generated/b.js)"
+
+dir="$(node_repo lockfile)"
+sed -e "s#- 'package\*.json'#- package.json#" "$dir/.github/workflows/pr-checks.yml" > "$dir/w" \
+  && mv "$dir/w" "$dir/.github/workflows/pr-checks.yml"
+out="$(run_doctor "$dir")"
+expect "doctor: pr-checks.yml must fire for dependency and config files too" "$out" \
+  "+pr-checks.yml paths: filter misses 1 of your config, setup and dependency files (e.g. package-lock.json)"
 
 dir="$(kit_repo big-go)"
 for i in $(seq 1 4000); do echo "package p" > "$dir/file_with_a_long_enough_name_$i.go"; done
@@ -214,6 +234,12 @@ jq '.commands.install = 123' "$dir/.claude/agent-ci.json" > "$dir/cfg" && mv "$d
 out="$(run_doctor "$dir")"
 expect "doctor: a non-string install command fails" "$out" \
   "+✗ commands.install: must be a string" "-✓ fields and commands valid"
+
+dir="$(node_repo deps-string)"
+jq '.dependency_files = "package.json"' "$dir/.claude/agent-ci.json" > "$dir/cfg" && mv "$dir/cfg" "$dir/.claude/agent-ci.json"
+out="$(run_doctor "$dir")"
+expect "doctor: dependency_files that is not a list fails" "$out" \
+  "+✗ dependency_files: must be a list of non-empty strings" "-✓ fields and commands valid"
 
 dir="$(node_repo bad-fields)"
 cat > "$dir/.claude/agent-ci.json" << 'EOF'
@@ -255,6 +281,13 @@ out="$(github_doctor "$repo_dir" "$gh_dir")"
 expect "doctor: a pull request rule without code owner review fails" "$out" \
   "+✗ main requires a pull request but not an approval with code owner review"
 
+gh_dir="$(github_ok stale-approval)"
+echo '[{"type": "pull_request", "ruleset_id": 7, "parameters": {"required_approving_review_count": 1, "require_code_owner_review": true, "dismiss_stale_reviews_on_push": false, "require_last_push_approval": false}}]' \
+  > "$gh_dir/repos_acme_app_rules_branches_main.json"
+out="$(github_doctor "$repo_dir" "$gh_dir")"
+expect "doctor: an approval that survives later pushes fails" "$out" \
+  "+✗ main keeps an approval after new pushes"
+
 gh_dir="$(github_ok no-gate)"
 echo '[]' > "$gh_dir/repos_acme_app_rules_branches_main.json"
 out="$(github_doctor "$repo_dir" "$gh_dir")"
@@ -262,11 +295,11 @@ expect "doctor: no merge gate at all fails" "$out" "+✗ main does not require a
 
 gh_dir="$(github_ok classic)"
 echo '[]' > "$gh_dir/repos_acme_app_rules_branches_main.json"
-echo '{"required_pull_request_reviews": {"required_approving_review_count": 1, "require_code_owner_reviews": true}}' \
+echo '{"required_pull_request_reviews": {"required_approving_review_count": 1, "require_code_owner_reviews": true, "dismiss_stale_reviews": true}}' \
   > "$gh_dir/repos_acme_app_branches_main_protection.json"
 out="$(github_doctor "$repo_dir" "$gh_dir")"
 expect "doctor: classic branch protection with code owner review passes" "$out" \
-  "+✓ main requires a code owner's approval (branch protection)"
+  "+✓ main requires a code owner's approval (branch protection)" "-keeps an approval"
 
 gh_dir="$(github_ok app-bypass)"
 echo '{"bypass_actors": [{"actor_type": "Integration", "actor_id": 1234, "bypass_mode": "always"}]}' \

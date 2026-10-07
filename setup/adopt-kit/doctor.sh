@@ -123,7 +123,9 @@ else
        end),
       (if (check | length) == 0 then "commands.check: required, the gate CI and agents run before pushing" else empty end),
       (granted[] | select(cmd | not) | "not one plain command (no quotes or shell operators; wrap it in a Makefile target or package script): \(tojson)"),
-      ((.protected_paths // [])[] | select(type != "string" or length == 0) | "protected_paths: entries must be non-empty strings")
+      ((.protected_paths // [])[] | select(type != "string" or length == 0) | "protected_paths: entries must be non-empty strings"),
+      (.dependency_files | select(. != null and (type != "array" or any(.[]; type != "string" or length == 0)))
+        | "dependency_files: must be a list of non-empty strings")
     ] | .[]' "$cfg" 2> /dev/null)" || errors="a field has the wrong type (see docs/PROJECT-CONFIG.md)"
   if [ -n "$errors" ]; then
     while IFS= read -r e; do fail "$e"; done <<< "$errors"
@@ -142,7 +144,7 @@ else
   while IFS= read -r df; do
     [ -n "$df" ] || continue
     [ -e "$df" ] || warn "dependency file $df does not exist"
-  done < <(jq -r '.dependency_files // [] | .[]' "$cfg")
+  done < <(jq -r '.dependency_files | arrays | .[] | strings' "$cfg" 2> /dev/null)
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     [ -e "$p" ] || warn "protected path $p does not exist (typo?)"
@@ -198,23 +200,22 @@ for w in pr-checks build-image; do
   fi
 done
 # Reads file paths on stdin; prints those a workflow's `paths:` filter would not
-# trigger on: matched by no pattern, or excluded by a `!` pattern.
+# trigger on. Patterns apply in order, as on GitHub: a `!` pattern drops what
+# earlier ones matched, and a later positive pattern can bring it back.
 untriggered() {
-  local pos="" neg="" g r files
-  while IFS= read -r g; do
-    [ -n "$g" ] || continue
-    if [ "${g#!}" != "$g" ]; then
-      r="$(glob_re "${g#!}")" && [ -n "$r" ] && neg="${neg:+$neg|}($r)"
-    else
-      r="$(glob_re "$g")" && [ -n "$r" ] && pos="${pos:+$pos|}($r)"
-    fi
-  done < <(path_filters "$1")
+  local g r files hit=""
   files="$(cat)"
   [ -n "$files" ] || return 0
-  {
-    if [ -n "$pos" ]; then grep -vE "$pos" <<< "$files" || true; else printf '%s\n' "$files"; fi
-    if [ -n "$neg" ]; then grep -E "$neg" <<< "$files" || true; fi
-  } | sort -u
+  while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    r="$(glob_re "${g#!}")" && [ -n "$r" ] || continue
+    if [ "${g#!}" != "$g" ]; then
+      hit="$(grep -vE "$r" <<< "$hit" || true)"
+    else
+      hit="$(printf '%s\n%s\n' "$hit" "$(grep -E "$r" <<< "$files" || true)" | sort -u)"
+    fi
+  done < <(path_filters "$1")
+  comm -23 <(sort -u <<< "$files") <(sort -u <<< "$hit") | grep . || true
 }
 # Fails when a workflow's filter would skip a change to any of the given files.
 check_triggers() {
@@ -224,11 +225,19 @@ check_triggers() {
   fail "$1.yml paths: filter misses $(grep -c . <<< "$missed") of your $2 (e.g. $(head -n 1 <<< "$missed")); a change there would not run it"
   leftover=1
 }
-# pr-checks.yml must run for a change to any source file of a configured stack.
+# pr-checks.yml must run for a change to any source file of a configured stack,
+# and to anything else that changes what the checks do: the kit config, the
+# setup action, the workflow itself and the dependency files.
 if [ -f .github/workflows/pr-checks.yml ] && [ -f "$cfg" ]; then
   for stack in $(jq -r '.toolchain // {} | keys[]' "$cfg" 2> /dev/null); do
     check_triggers pr-checks "$stack files" "$(stack_files "$stack")"
   done
+  check_triggers pr-checks "config, setup and dependency files" "$(
+    find "$cfg" .github/workflows/pr-checks.yml .github/actions/project-setup -type f 2> /dev/null
+    jq -r '.dependency_files | arrays | .[] | strings' "$cfg" 2> /dev/null | while IFS= read -r df; do
+      [ -f "$df" ] && echo "$df"
+    done
+  )"
 fi
 if [ -f .github/workflows/build-image.yml ]; then
   dockerfile="$(jq -r '.image.dockerfile // "Dockerfile"' "$cfg" 2> /dev/null || echo Dockerfile)"
@@ -238,10 +247,19 @@ if [ -f .github/workflows/build-image.yml ]; then
     fail "build-image.yml is present but $cfg has no image section"; leftover=1
   else
     # build-image.yml must run for a change to anything that goes into the image.
+    # Untracked files count too: doctor runs before the setup commit.
     inputs=()
-    while IFS= read -r i; do [ -n "$i" ] && inputs+=("$i"); done < <(jq -r '.image.inputs // [] | .[]' "$cfg" 2> /dev/null)
+    while IFS= read -r i; do
+      [ -n "$i" ] || continue
+      inputs+=("$i")
+      case "$i" in ':!'* | ':^'* | ':(exclude'*) continue ;; esac
+      if [ -z "$(git ls-files --cached --others --exclude-standard -- "$i" 2> /dev/null)" ]; then
+        fail "image.inputs entry $i matches no files; the image hash would leave out what it was meant to cover"; leftover=1
+      fi
+    done < <(jq -r '.image.inputs // [] | .[]' "$cfg" 2> /dev/null)
     if [ "${#inputs[@]}" -gt 0 ]; then
-      check_triggers build-image "image input files" "$(git ls-files -- "${inputs[@]}" 2> /dev/null || true)"
+      check_triggers build-image "image input files" \
+        "$(git ls-files --cached --others --exclude-standard -- "${inputs[@]}" 2> /dev/null || true)"
     fi
   fi
 fi
@@ -350,13 +368,16 @@ else
   # (readable without admin), then classic branch protection.
   owner="${repo%%/*}"
   rules="$(gh api "repos/$repo/rules/branches/$default" 2> /dev/null || echo '[]')"
-  gate="$(jq -c '[.[] | select(.type == "pull_request") | .parameters + {ruleset_id: .ruleset_id}]
-    | (map(select((.required_approving_review_count // 0) >= 1 and .require_code_owner_review == true)) + .) | first // empty' <<< "$rules" 2> /dev/null || true)"
+  gate="$(jq -c 'def strong: (.required_approving_review_count // 0) >= 1 and .require_code_owner_review == true;
+    def fresh: .dismiss_stale_reviews_on_push == true or .require_last_push_approval == true;
+    [.[] | select(.type == "pull_request") | .parameters + {ruleset_id: .ruleset_id}]
+    | (map(select(strong and fresh)) + map(select(strong)) + .) | first // empty' <<< "$rules" 2> /dev/null || true)"
   via=ruleset
   if [ -z "$gate" ]; then
     via="branch protection"
     gate="$(gh api "repos/$repo/branches/$default/protection" --jq '.required_pull_request_reviews // empty
-      | {required_approving_review_count, require_code_owner_review: .require_code_owner_reviews}' 2> /dev/null || true)"
+      | {required_approving_review_count, require_code_owner_review: .require_code_owner_reviews,
+         dismiss_stale_reviews_on_push: .dismiss_stale_reviews, require_last_push_approval}' 2> /dev/null || true)"
   fi
   if [ -z "$gate" ]; then
     fail "$default does not require a pull request; set up the ruleset in README Quickstart step 5 (private repos need GitHub Pro or a paid org)"
@@ -364,6 +385,9 @@ else
     fail "$default requires a pull request but not an approval with code owner review; nothing stops an agent merging its own PR (docs/GUARDRAILS.md)"
   else
     ok "$default requires a code owner's approval ($via)"
+    if ! jq -e '.dismiss_stale_reviews_on_push == true or .require_last_push_approval == true' <<< "$gate" > /dev/null; then
+      fail "$default keeps an approval after new pushes, so an agent push after your approval needs no review; turn on \"Require approval of the most recent reviewable push\""
+    fi
     id="$(jq -r '.ruleset_id // empty' <<< "$gate")"
     if [ -n "$id" ] && bypass="$(gh api "repos/$repo/rulesets/$id" --jq '.bypass_actors // empty' 2> /dev/null)" && [ -n "$bypass" ]; then
       if jq -e 'any(.[]; .actor_type == "Integration")' <<< "$bypass" > /dev/null; then

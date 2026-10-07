@@ -148,7 +148,8 @@ Copy from `$KIT`, keeping paths:
   (scripts the agent workflows call)
 - `.github/ISSUE_TEMPLATE/agent-fix.yml`, with the fix workflow
 - `.github/CODEOWNERS`: rewritten below
-- `.claude/skills/` and `.claude/skills.json` (vendored; copy as is)
+- `.claude/skills/` and `.claude/skills.json` (vendored; copy as is, but
+  see the merge rules)
 - `.claude/hooks/session-start.sh`, `.claude/settings.json`
 - `.claude/agent-ci.schema.json`
 - `.claude/agent-ci.json`, `.claude/project-profile.md`, `AGENTS.md`,
@@ -168,6 +169,10 @@ Merge rules for files that already exist:
   hooks; keep everything else.
 - A workflow with the same file name: stop and ask. Do not rename or merge
   CI files on your own.
+- `.claude/skills/`: keep every skill they have. A kit skill whose directory
+  name they already use: stop and ask.
+- `.claude/skills.json`: if they have one, stop and ask; it is the manifest
+  of another set of vendored skills, and replacing it drops theirs.
 
 Fill in:
 
@@ -217,7 +222,7 @@ that changed since this skill was written):
   ```
 - Repo variables, only for caps they changed: `gh variable set NAME --body VALUE`.
 - The merge gate on the default branch, unless doctor already shows it
-  (README Quickstart step 5 explains it; follow the README if it differs):
+  (README Quickstart step 5 explains it):
   ```
   gh api repos/OWNER/REPO/rulesets -X POST --input - <<'EOF'
   {"name": "Code owner review", "target": "branch", "enforcement": "active",
@@ -225,7 +230,7 @@ that changed since this skill was written):
    "bypass_actors": [{"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"}],
    "rules": [{"type": "pull_request", "parameters": {
      "required_approving_review_count": 1, "dismiss_stale_reviews_on_push": false,
-     "require_code_owner_review": true, "require_last_push_approval": false,
+     "require_code_owner_review": true, "require_last_push_approval": true,
      "required_review_thread_resolution": false}}]}
   EOF
   ```
@@ -233,9 +238,13 @@ that changed since this skill was written):
   merge and runs checks it can edit, but it is never a code owner and cannot
   bypass. Actor 5 is the Repository admin role. Agent PRs are opened with
   their PAT, so GitHub lists them as the author and they cannot approve
-  their own PRs; they merge with the admin bypass. Never add an app or the
-  agent's identity to the bypass list. If a ruleset already covers the
-  default branch, show them the difference instead of adding a second one.
+  their own PRs; they merge with the admin bypass. That bypass belongs to
+  whoever holds the PAT, so the kit only uses `AGENT_PR_TOKEN` in a step
+  after the agent has exited; never pass it to an agent step. Never add an
+  app or the agent's identity to the bypass list. Approval of the latest
+  push means a push the agent makes after their approval needs approving
+  again. If a ruleset already covers the default branch, show them the
+  difference instead of adding a second one.
   On a free personal account, private repos cannot use rulesets or branch
   protection and this call fails with 403. Say so plainly: without it,
   nothing stops an agent merging its own PR (`$KIT/docs/GUARDRAILS.md`).
