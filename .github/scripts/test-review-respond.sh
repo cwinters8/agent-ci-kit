@@ -60,6 +60,9 @@ echo c >> app.go; commit 'agent change' > /dev/null
 expect "untouched protected file from a human passes" "" "$(check)"
 echo more >> .claude/human.md; commit 'agent edits it' > /dev/null
 expect "agent editing that file is caught" ".claude/human.md" "$(check)"
+git reset -q --hard HEAD~1
+git rm -q .claude/human.md; commit 'agent reverts it to base' > /dev/null
+expect "agent reverting that file to the base is caught" ".claude/human.md" "$(check)"
 
 if "$here/protected-changes.sh" main deadbeef HEAD > /dev/null 2>&1; then
   expect "bad commit fails closed" "non-zero exit" "exit 0"
@@ -94,7 +97,8 @@ for p in "${pages[@]}"; do [ -e "$p" ] && jq -r "$expr" "$p"; done
 GH
 chmod +x "$tmp/bin/gh"
 
-# Page 1: this run (excluded), a skipped run, a cancelled run, a responder run.
+# Page 1: this run (now on attempt 2), a skipped run, a cancelled run that
+# got as far as the responder, and a normal responder run.
 cat > "$tmp/fx/runs-1.json" <<'J'
 {"workflow_runs":[
  {"id":100,"conclusion":null},
@@ -106,22 +110,38 @@ J
 cat > "$tmp/fx/runs-2.json" <<'J'
 {"workflow_runs":[{"id":4,"conclusion":"success"},{"id":5,"conclusion":"failure"}]}
 J
-cat > "$tmp/fx/jobs-3-1.json" <<'J'
-{"jobs":[{"id":31,"name":"Scope and budget","conclusion":"success"},{"id":32,"name":"Claude triages the review","conclusion":"success"}]}
+R='"name":"Claude triages the review"'
+G='"name":"Scope and budget"'
+# Attempt 1 of this run responded; attempt 2 (now) has not yet.
+cat > "$tmp/fx/jobs-100-1.json" <<J
+{"jobs":[{"id":1001,"run_id":100,"run_attempt":1,$R,"conclusion":"success"},
+ {"id":1002,"run_id":100,"run_attempt":2,$G,"conclusion":"success"},
+ {"id":1003,"run_id":100,"run_attempt":2,$R,"conclusion":null}]}
 J
-cat > "$tmp/fx/jobs-4-1.json" <<'J'
-{"jobs":[{"id":41,"name":"Scope and budget","conclusion":"success"},{"id":42,"name":"Claude triages the review","conclusion":"skipped"}]}
+cat > "$tmp/fx/jobs-1-1.json" <<J
+{"jobs":[{"id":11,"run_id":1,"run_attempt":1,$R,"conclusion":"success"}]}
 J
-cat > "$tmp/fx/jobs-5-1.json" <<'J'
-{"jobs":[{"id":51,"name":"Scope and budget","conclusion":"success"}]}
+cat > "$tmp/fx/jobs-2-1.json" <<J
+{"jobs":[{"id":21,"run_id":2,"run_attempt":1,$R,"conclusion":"cancelled"}]}
 J
-cat > "$tmp/fx/jobs-5-2.json" <<'J'
-{"jobs":[{"id":52,"name":"Claude triages the review","conclusion":"failure"}]}
+cat > "$tmp/fx/jobs-3-1.json" <<J
+{"jobs":[{"id":31,"run_id":3,"run_attempt":1,$G,"conclusion":"success"},{"id":32,"run_id":3,"run_attempt":1,$R,"conclusion":"success"}]}
+J
+cat > "$tmp/fx/jobs-4-1.json" <<J
+{"jobs":[{"id":41,"run_id":4,"run_attempt":1,$G,"conclusion":"success"},{"id":42,"run_id":4,"run_attempt":1,$R,"conclusion":"skipped"}]}
+J
+cat > "$tmp/fx/jobs-5-1.json" <<J
+{"jobs":[{"id":51,"run_id":5,"run_attempt":1,$G,"conclusion":"success"}]}
+J
+cat > "$tmp/fx/jobs-5-2.json" <<J
+{"jobs":[{"id":52,"run_id":5,"run_attempt":1,$R,"conclusion":"failure"}]}
 J
 
-got="$(PATH="$tmp/bin:$PATH" FIXTURES="$tmp/fx" GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=100 \
+got="$(PATH="$tmp/bin:$PATH" FIXTURES="$tmp/fx" GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=100 GITHUB_RUN_ATTEMPT=2 \
   RESPONDER="Claude triages the review" "$here/review-responses-today.sh" claude/issue-1 2026-01-01)"
-expect "cap counts only runs whose responder ran, across pages" "2" "$got"
+# Counted: run 100 attempt 1, run 2, run 3, run 5. Not: skipped run 1 (never
+# fetched), run 4 (gate only), run 100 attempt 2 (this one).
+expect "cap counts responder jobs across pages, attempts and cancellations" "4" "$got"
 
 echo
 if [ "$failures" -gt 0 ]; then echo "$failures failed"; exit 1; fi
