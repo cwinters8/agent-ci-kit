@@ -55,6 +55,7 @@ node_repo() {
 EOF
     printf '# Agent guide\n\nA tiny Node service.\n' > AGENTS.md
     printf '# Project profile\n\n## Repo\n\nPublic repo.\n' > .claude/project-profile.md
+    echo '* @acme' > .github/CODEOWNERS
     rm .github/workflows/build-image.yml
     sed -e "s#- '\*\*\.go'#- 'src/**'#" -e '/- go\.mod/d' -e '/- go\.sum/d' -e 's#- Makefile#- package.json#' \
       .github/workflows/pr-checks.yml > pr-checks.tmp && mv pr-checks.tmp .github/workflows/pr-checks.yml
@@ -64,6 +65,43 @@ EOF
 }
 
 run_doctor() { (cd "$1" && bash "$doctor" 2>&1) || true; }
+
+# A stand-in for `gh api PATH [--paginate] [--jq EXPR]` that answers from JSON
+# files in $FAKE_GH_DIR (PATH with / as _, query string dropped) and fails like
+# a 404 when there is none. Lets the GitHub checks run without a network.
+fakebin="$tmp/fakebin"
+mkdir -p "$fakebin"
+cat > "$fakebin/gh" << 'FAKE'
+#!/usr/bin/env bash
+[ "${1:-}" = api ] || exit 1
+path="${2%%\?*}"
+shift 2
+expr=.
+while [ $# -gt 0 ]; do
+  case "$1" in --jq) expr="$2"; shift 2 ;; *) shift ;; esac
+done
+f="$FAKE_GH_DIR/$(tr / _ <<< "$path").json"
+[ -f "$f" ] || { echo "HTTP 404: Not Found" >&2; exit 1; }
+jq -r "$expr" "$f"
+FAKE
+chmod +x "$fakebin/gh"
+
+# A healthy acme/app as GitHub would report it; each test breaks one piece.
+github_ok() {
+  local d="$tmp/gh-$1"
+  mkdir -p "$d"
+  echo '{"default_branch": "main", "visibility": "private"}' > "$d/repos_acme_app.json"
+  echo '{"enabled": true, "allowed_actions": "all"}' > "$d/repos_acme_app_actions_permissions.json"
+  echo '{"secrets": [{"name": "CLAUDE_CODE_OAUTH_TOKEN"}, {"name": "AGENT_PR_TOKEN"}]}' > "$d/repos_acme_app_actions_secrets.json"
+  echo '[{"name": "agent:fix"}, {"name": "agent:fix-opus"}, {"name": "agent:needs-human"}, {"name": "agent:large-diff"}]' > "$d/repos_acme_app_labels.json"
+  echo '[{"type": "pull_request", "ruleset_id": 7, "parameters": {"required_approving_review_count": 1, "require_code_owner_review": true}}]' > "$d/repos_acme_app_rules_branches_main.json"
+  echo '{"bypass_actors": [{"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"}]}' > "$d/repos_acme_app_rulesets_7.json"
+  echo '{}' > "$d/repos_acme_app_contents_.claude_agent-ci.json.json"
+  echo '{}' > "$d/repos_acme_app_contents_.github_CODEOWNERS.json"
+  echo '{"errors": []}' > "$d/repos_acme_app_codeowners_errors.json"
+  echo "$d"
+}
+github_doctor() { (cd "$1" && FAKE_GH_DIR="$2" PATH="$fakebin:$PATH" bash "$doctor" acme/app 2>&1) || true; }
 
 # ------------------------------------------------------------------ install.sh
 cfgdir="$tmp/claude-config"
@@ -199,6 +237,59 @@ rm "$dir/.github/workflows/claude-fix-issue.yml" "$dir/.github/workflows/claude-
 out="$(run_doctor "$dir")"
 expect "doctor: the fix workflow's files are optional when it is not installed" "$out" \
   "+✓ 1 agent workflow(s)" "-agent-fix.yml"
+
+# ------------------------------------------------------------------ doctor.sh, GitHub side
+repo_dir="$(node_repo github)"
+out="$(github_doctor "$repo_dir" "$(github_ok healthy)")"
+expect "doctor: a healthy repo passes the GitHub checks" "$out" \
+  "+✓ main requires a code owner's approval (ruleset)" "+✓ agent labels exist" "+✓ AGENT_PR_TOKEN secret set" \
+  "+Ready." "-✗"
+
+gh_dir="$(github_ok weak-gate)"
+echo '[{"type": "pull_request", "ruleset_id": 7, "parameters": {"required_approving_review_count": 0, "require_code_owner_review": false}}]' \
+  > "$gh_dir/repos_acme_app_rules_branches_main.json"
+out="$(github_doctor "$repo_dir" "$gh_dir")"
+expect "doctor: a pull request rule without code owner review fails" "$out" \
+  "+✗ main requires a pull request but not an approval with code owner review"
+
+gh_dir="$(github_ok no-gate)"
+echo '[]' > "$gh_dir/repos_acme_app_rules_branches_main.json"
+out="$(github_doctor "$repo_dir" "$gh_dir")"
+expect "doctor: no merge gate at all fails" "$out" "+✗ main does not require a pull request"
+
+gh_dir="$(github_ok classic)"
+echo '[]' > "$gh_dir/repos_acme_app_rules_branches_main.json"
+echo '{"required_pull_request_reviews": {"required_approving_review_count": 1, "require_code_owner_reviews": true}}' \
+  > "$gh_dir/repos_acme_app_branches_main_protection.json"
+out="$(github_doctor "$repo_dir" "$gh_dir")"
+expect "doctor: classic branch protection with code owner review passes" "$out" \
+  "+✓ main requires a code owner's approval (branch protection)"
+
+gh_dir="$(github_ok app-bypass)"
+echo '{"bypass_actors": [{"actor_type": "Integration", "actor_id": 1234, "bypass_mode": "always"}]}' \
+  > "$gh_dir/repos_acme_app_rulesets_7.json"
+out="$(github_doctor "$repo_dir" "$gh_dir")"
+expect "doctor: a ruleset an app can bypass fails" "$out" "+✗ the main ruleset lets a GitHub App bypass it"
+
+dir="$(node_repo kit-owner)"
+echo '* @cwinters8' > "$dir/.github/CODEOWNERS"
+out="$(github_doctor "$dir" "$(github_ok kit-owner)")"
+expect "doctor: CODEOWNERS still naming the kit author fails" "$out" \
+  "+✗ .github/CODEOWNERS still names the kit's author"
+
+dir="$(node_repo no-codeowners)"
+rm "$dir/.github/CODEOWNERS"
+out="$(run_doctor "$dir")"
+expect "doctor: a missing CODEOWNERS fails" "$out" "+✗ .github/CODEOWNERS missing"
+
+gh_dir="$(github_ok claude-only)"
+echo '{"secrets": [{"name": "ANTHROPIC_API_KEY"}]}' > "$gh_dir/repos_acme_app_actions_secrets.json"
+echo '[]' > "$gh_dir/repos_acme_app_labels.json"
+dir="$(node_repo gh-claude-only)"
+rm "$dir/.github/workflows/claude-fix-issue.yml" "$dir/.github/workflows/claude-review-sweep.yml"
+out="$(github_doctor "$dir" "$gh_dir")"
+expect "doctor: secrets and labels follow the installed workflows" "$out" \
+  "+✓ Claude credential secret set" "-AGENT_PR_TOKEN" "-missing labels"
 
 echo
 if [ "$failures" -gt 0 ]; then

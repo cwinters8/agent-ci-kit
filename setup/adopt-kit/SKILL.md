@@ -123,7 +123,9 @@ Usually that is:
 - **Which pieces**: issue-to-PR fixes (`claude-fix-issue.yml`, the core),
   `@claude` follow-ups on PRs (`claude.yml`), the daily review sweep
   (`claude-review-sweep.yml`), PR checks (`pr-checks.yml`), image builds
-  (`build-image.yml`; only with a Dockerfile). Recommend the first three. Add
+  (`build-image.yml`; only with a Dockerfile). `$KIT/.github/workflows/` may
+  hold more agent workflows than this list; read each one's header comment
+  and offer it in a line. Recommend the first three. Add
   PR checks unless their CI already runs the same gate on every PR; running
   it twice only costs minutes. The VPS runner (`vps/`) is a separate guide
   module; leave it out.
@@ -140,9 +142,12 @@ Usually that is:
 
 Copy from `$KIT`, keeping paths:
 
-- `.github/workflows/`: the workflows they chose
-- `.github/actions/project-setup/`
+- `.github/workflows/`: the workflows they chose, plus `kit-checks.yml` if
+  the kit has it (it tests the guardrail scripts below)
+- `.github/actions/project-setup/`, and `.github/scripts/` if the kit has it
+  (scripts the agent workflows call)
 - `.github/ISSUE_TEMPLATE/agent-fix.yml`, with the fix workflow
+- `.github/CODEOWNERS`: rewritten below
 - `.claude/skills/` and `.claude/skills.json` (vendored; copy as is)
 - `.claude/hooks/session-start.sh`, `.claude/settings.json`
 - `.claude/agent-ci.schema.json`
@@ -166,6 +171,11 @@ Merge rules for files that already exist:
 
 Fill in:
 
+- **`.github/CODEOWNERS`**: `* @<their handle>` (`gh api user --jq .login`),
+  or the team they name. Never the kit author's handle, and never an account
+  or app the agents run as: code owner review is what stops an agent merging
+  its own PR. If they already have a CODEOWNERS, keep it and make sure every
+  path has a human owner.
 - **`.claude/agent-ci.json`** from the survey, field by field against the
   schema. Every command you name is on the agents' allowlist, so name only
   what an agent should be able to run. `jq empty` must pass.
@@ -206,23 +216,31 @@ that changed since this skill was written):
   gh label create agent:large-diff  --color fbca04 --description "Agent diff over AGENT_MAX_DIFF_LINES" --force
   ```
 - Repo variables, only for caps they changed: `gh variable set NAME --body VALUE`.
-- Require a PR on the default branch, if it does not already (doctor says):
+- The merge gate on the default branch, unless doctor already shows it
+  (README Quickstart step 5 explains it; follow the README if it differs):
   ```
   gh api repos/OWNER/REPO/rulesets -X POST --input - <<'EOF'
-  {"name": "Require PR", "target": "branch", "enforcement": "active",
+  {"name": "Code owner review", "target": "branch", "enforcement": "active",
    "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+   "bypass_actors": [{"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"}],
    "rules": [{"type": "pull_request", "parameters": {
-     "required_approving_review_count": 0, "dismiss_stale_reviews_on_push": false,
-     "require_code_owner_review": false, "require_last_push_approval": false,
+     "required_approving_review_count": 1, "dismiss_stale_reviews_on_push": false,
+     "require_code_owner_review": true, "require_last_push_approval": false,
      "required_review_thread_resolution": false}}]}
   EOF
   ```
-  Zero required approvals is deliberate for a solo maintainer, who cannot
-  approve their own PR. With collaborators, suggest 1.
+  This is what stops an agent merging: it pushes with a token that can
+  merge and runs checks it can edit, but it is never a code owner and cannot
+  bypass. Actor 5 is the Repository admin role. Agent PRs are opened with
+  their PAT, so GitHub lists them as the author and they cannot approve
+  their own PRs; they merge with the admin bypass. Never add an app or the
+  agent's identity to the bypass list. If a ruleset already covers the
+  default branch, show them the difference instead of adding a second one.
   On a free personal account, private repos cannot use rulesets or branch
-  protection and this call fails with 403. Say so, and that the other
-  guardrails still hold: agents push only `claude/` branches and the
-  workflow opens drafts.
+  protection and this call fails with 403. Say so plainly: without it,
+  nothing stops an agent merging its own PR (`$KIT/docs/GUARDRAILS.md`).
+  Their options are GitHub Pro, a public repo, or accepting that risk; let
+  them choose.
 
 **Their part.** You cannot do these and must not try. Give them as a numbered
 list, to run in a separate terminal:
@@ -231,10 +249,9 @@ list, to run in a separate terminal:
 2. The Claude credential they chose:
    - subscription: `claude setup-token`, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN` and paste at the prompt
    - API: `gh secret set ANTHROPIC_API_KEY` and paste at the prompt
-3. Only if they installed `claude-fix-issue.yml` or `claude-review-sweep.yml`
-   (the workflows that open or push to PRs; `claude.yml` does not use it):
-   `AGENT_PR_TOKEN`, a fine-grained personal access token for this repo only,
-   with the permissions `$KIT/README.md` lists, created at
+3. Only if an installed workflow reads `secrets.AGENT_PR_TOKEN` (grep for
+   it): `AGENT_PR_TOKEN`, a fine-grained personal access token for this repo
+   only, with the permissions `$KIT/README.md` lists, created at
    https://github.com/settings/personal-access-tokens/new. Then
    `gh secret set AGENT_PR_TOKEN`. Without it, CI never runs on agent PRs.
 
@@ -251,9 +268,11 @@ added, push, and `gh pr create`. The PR body says:
 - any Makefile target or script you added,
 - what is left (their part of step 5, if not done yet).
 
-Tell the user two things: their own `pr-checks` run on this PR is the first
-proof the config works, and the agent workflows read the config from the
-default branch, so nothing agent-side runs until they merge.
+Tell the user three things: their own `pr-checks` run on this PR is the
+first proof the config works; the agent workflows read the config from the
+default branch, so nothing agent-side runs until they merge; and with the
+merge gate on, they merge their own setup PR with the admin bypass, as they
+will agent PRs.
 
 ## 7. First agent fix
 

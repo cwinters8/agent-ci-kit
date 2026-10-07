@@ -24,6 +24,13 @@ schema=.claude/agent-ci.schema.json
 labels=(agent:fix agent:fix-opus agent:needs-human agent:large-diff)
 skills=(action-versions code-review pr-preflight review-sweep security-review)
 has() { [ -f ".github/workflows/$1.yml" ]; }  # is this kit workflow installed?
+# Does any installed workflow mention $1? Decides which secrets and labels
+# GitHub needs, so doctor follows the workflows rather than a fixed list.
+workflows_use() { cat .github/workflows/*.yml 2> /dev/null | grep -qF -- "$1"; }
+codeowners=""
+for f in .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS; do
+  [ -f "$f" ] && { codeowners="$f"; break; }
+done
 
 # ---------------------------------------------------------------- tools
 section "Tools"
@@ -52,13 +59,20 @@ for s in "${skills[@]}"; do
   [ -f ".claude/skills/$s/SKILL.md" ] || fail ".claude/skills/$s/SKILL.md missing"
 done
 agent_workflows=0
-for w in claude-fix-issue claude claude-review-sweep; do
-  [ -f ".github/workflows/$w.yml" ] && agent_workflows=$((agent_workflows + 1))
+for w in .github/workflows/claude*.yml; do
+  [ -f "$w" ] && agent_workflows=$((agent_workflows + 1))
 done
 if [ "$agent_workflows" -gt 0 ]; then
   ok "$agent_workflows agent workflow(s) in .github/workflows/"
 else
-  fail "no agent workflows (claude-fix-issue.yml, claude.yml, claude-review-sweep.yml)"
+  fail "no agent workflows (.github/workflows/claude*.yml)"
+fi
+# Code owner review is what stops an agent merging (docs/GUARDRAILS.md), and
+# it needs someone to require.
+if [ -z "$codeowners" ]; then
+  fail ".github/CODEOWNERS missing; the merge gate's code owner review has no one to require"
+elif ! grep -qE '^[^#]*@' "$codeowners"; then
+  fail "$codeowners names no owner; the merge gate's code owner review has no one to require"
 fi
 if [ -f CLAUDE.md ] && ! grep -q '@AGENTS.md' CLAUDE.md; then
   warn "CLAUDE.md does not import @AGENTS.md; Claude Code may not read the agent rules"
@@ -295,7 +309,7 @@ else
     else
       fail "no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret"
     fi
-    if ! has claude-fix-issue && ! has claude-review-sweep; then
+    if ! workflows_use secrets.AGENT_PR_TOKEN; then
       :
     elif grep -qx AGENT_PR_TOKEN <<< "$secrets"; then
       ok "AGENT_PR_TOKEN secret set"
@@ -306,7 +320,7 @@ else
     skip "could not list secrets (needs admin); check Settings > Secrets and variables > Actions"
   fi
 
-  if ! has claude-fix-issue; then
+  if ! workflows_use agent:fix; then
     :
   elif have="$(gh api "repos/$repo/labels" --paginate --jq '.[].name' 2> /dev/null)"; then
     missing=()
@@ -330,15 +344,45 @@ else
     fi
   fi
 
-  # Rulesets first (readable without admin), then classic branch protection.
-  rules="$(gh api "repos/$repo/rules/branches/$default" --jq '.[].type' 2> /dev/null || true)"
-  protection="$(gh api "repos/$repo/branches/$default/protection" --jq '.required_pull_request_reviews // empty' 2> /dev/null || true)"
-  if grep -qx pull_request <<< "$rules"; then
-    ok "$default requires a pull request (ruleset)"
-  elif [ -n "$protection" ]; then
-    ok "$default requires a pull request (branch protection)"
+  # The merge gate (README Quickstart step 5): a pull request with an approval
+  # and code owner review. The agent is never a code owner, so it cannot merge
+  # its own work, whatever commands it manages to run. Rulesets first
+  # (readable without admin), then classic branch protection.
+  owner="${repo%%/*}"
+  rules="$(gh api "repos/$repo/rules/branches/$default" 2> /dev/null || echo '[]')"
+  gate="$(jq -c '[.[] | select(.type == "pull_request") | .parameters + {ruleset_id: .ruleset_id}]
+    | (map(select((.required_approving_review_count // 0) >= 1 and .require_code_owner_review == true)) + .) | first // empty' <<< "$rules" 2> /dev/null || true)"
+  via=ruleset
+  if [ -z "$gate" ]; then
+    via="branch protection"
+    gate="$(gh api "repos/$repo/branches/$default/protection" --jq '.required_pull_request_reviews // empty
+      | {required_approving_review_count, require_code_owner_review: .require_code_owner_reviews}' 2> /dev/null || true)"
+  fi
+  if [ -z "$gate" ]; then
+    fail "$default does not require a pull request; set up the ruleset in README Quickstart step 5 (private repos need GitHub Pro or a paid org)"
+  elif ! jq -e '(.required_approving_review_count // 0) >= 1 and .require_code_owner_review == true' <<< "$gate" > /dev/null; then
+    fail "$default requires a pull request but not an approval with code owner review; nothing stops an agent merging its own PR (docs/GUARDRAILS.md)"
   else
-    warn "$default does not require a pull request; anything with push access can bypass review"
+    ok "$default requires a code owner's approval ($via)"
+    id="$(jq -r '.ruleset_id // empty' <<< "$gate")"
+    if [ -n "$id" ] && bypass="$(gh api "repos/$repo/rulesets/$id" --jq '.bypass_actors // empty' 2> /dev/null)" && [ -n "$bypass" ]; then
+      if jq -e 'any(.[]; .actor_type == "Integration")' <<< "$bypass" > /dev/null; then
+        fail "the $default ruleset lets a GitHub App bypass it; an agent acting as that app could merge. Keep only the Repository admin role"
+      elif ! jq -e 'any(.[]; .actor_type == "RepositoryRole" and .actor_id == 5)' <<< "$bypass" > /dev/null; then
+        warn "the $default ruleset has no Repository admin bypass; agent PRs are opened as you, so you cannot approve or merge them"
+      fi
+    fi
+  fi
+
+  if [ -n "$codeowners" ] && [ "$owner" != cwinters8 ] && grep -qE '^[^#]*@cwinters8([[:space:]]|$)' "$codeowners"; then
+    fail "$codeowners still names the kit's author (@cwinters8); put your handle or team there"
+  fi
+  if [ -n "$codeowners" ]; then
+    if ! gh api "repos/$repo/contents/$codeowners?ref=$default" > /dev/null 2>&1; then
+      warn "$codeowners is not on $default yet; code owner review takes effect once the setup PR merges"
+    elif errs="$(gh api "repos/$repo/codeowners/errors?ref=$default" --jq '.errors[] | "line \(.line): \(.message)"' 2> /dev/null)" && [ -n "$errs" ]; then
+      fail "GitHub rejects $codeowners: $(head -n 1 <<< "$errs")"
+    fi
   fi
 
   if gh api "repos/$repo/contents/$cfg?ref=$default" > /dev/null 2>&1; then
