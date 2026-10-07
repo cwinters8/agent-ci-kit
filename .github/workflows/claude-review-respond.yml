@@ -58,6 +58,14 @@ jobs:
     outputs:
       allowed: ${{ steps.budget.outputs.allowed }}
     steps:
+      # The kit's scripts, from the default branch rather than the PR.
+      - name: Check out kit scripts
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
       # claude.yml answers `@claude` in an inline comment (matched without
       # case, as claude.yml and the action do). Leave those reviews to it
       # rather than running two agents on one review. Bare approvals still run:
@@ -87,18 +95,8 @@ jobs:
           BRANCH: ${{ github.event.pull_request.head.ref }}
           RESPONDER: Claude triages the review
         run: |
-          # Count runs whose responder job actually ran. A run the gate turned
-          # away still concludes "success", so the run conclusion is not enough.
           today="$(date -u +%Y-%m-%d)"
-          runs="$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/claude-review-respond.yml/runs" \
-            -f branch="$BRANCH" -f created=">=$today" -F per_page=100 \
-            --jq '.workflow_runs[] | select(.id != '"$GITHUB_RUN_ID"' and .conclusion != "skipped" and .conclusion != "cancelled") | .id')"
-          used=0
-          for id in $runs; do
-            n="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs" \
-              --jq '[.jobs[] | select(.name == $ENV.RESPONDER and .conclusion != "skipped")] | length')"
-            used=$((used + n))
-          done
+          used="$(.github/scripts/review-responses-today.sh "$BRANCH" "$today")"
           echo "Review responses on this PR today: $used / $CAP"
           if [ "$used" -ge "$CAP" ]; then
             echo "allowed=false" >> "$GITHUB_OUTPUT"
@@ -159,31 +157,29 @@ jobs:
           before="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha)"
           git fetch -q origin "$BASE" "refs/pull/$PR/head"
           echo "before=$before" >> "$GITHUB_OUTPUT"
-          pattern='^(\.github/|\.claude/)|(^|/)\.env'
-          [ -z "$EXTRA" ] || pattern="$pattern|$EXTRA"
 
-          # Prints protected paths whose content differs between two commits of
-          # the PR. Only paths in the PR's own diff (three-dot) count, so
-          # merging the base branch in never trips it.
-          check="$RUNNER_TEMP/protected-changes.sh"
-          cat > "$check" <<EOF
-          #!/usr/bin/env bash
-          set -euo pipefail
-          old="\$1" new="\$2"
-          git diff --no-renames --name-only "origin/$BASE...\$new" | grep -E '$pattern' | while read -r f; do
-            git diff --quiet "\$old" "\$new" -- "\$f" || echo "\$f"
-          done || true
-          EOF
-          chmod +x "$check"
-          echo "check=$check" >> "$GITHUB_OUTPUT"
+          # Copied out of the checkout, which becomes the PR branch once the
+          # agent switches to it. Values travel as files, never as shell text.
+          guard="$RUNNER_TEMP/guard"
+          mkdir -p "$guard"
+          cp .github/scripts/protected-changes.sh "$guard/check"
+          printf '%s' "origin/$BASE" > "$guard/base"
+          printf '%s' "$before" > "$guard/before"
+          printf '%s' "$EXTRA" > "$guard/extra"
+          echo "dir=$guard" >> "$GITHUB_OUTPUT"
 
           cat > .git/hooks/pre-push <<EOF
           #!/usr/bin/env bash
+          guard='$guard'
+          export PROTECTED_EXTRA="\$(cat "\$guard/extra")"
           while read -r _ local_sha _ remote_sha; do
             [ "\$local_sha" = 0000000000000000000000000000000000000000 ] && continue
             old="\$remote_sha"
-            [ "\$old" = 0000000000000000000000000000000000000000 ] && old="$before"
-            hits="\$("$check" "\$old" "\$local_sha")"
+            [ "\$old" = 0000000000000000000000000000000000000000 ] && old="\$(cat "\$guard/before")"
+            hits="\$("\$guard/check" "\$(cat "\$guard/base")" "\$old" "\$local_sha")" || {
+              echo "Protected-path check failed; refusing to push." >&2
+              exit 1
+            }
             if [ -n "\$hits" ]; then
               echo "Refusing to push changes to protected paths; a human makes these:" >&2
               echo "\$hits" >&2
@@ -234,12 +230,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           BEFORE: ${{ steps.guard.outputs.before }}
-          CHECK: ${{ steps.guard.outputs.check }}
+          GUARD: ${{ steps.guard.outputs.dir }}
+          PROTECTED_EXTRA: ${{ steps.project.outputs.protected-pattern }}
         run: |
           git fetch -q origin "refs/pull/$PR/head"
           after="$(git rev-parse FETCH_HEAD)"
           [ "$after" != "$BEFORE" ] || exit 0
-          hits="$("$CHECK" "$BEFORE" "$after")"
+          # A failed check counts as a hit: fail closed.
+          hits="$("$GUARD/check" "$(cat "$GUARD/base")" "$BEFORE" "$after" 2>&1)" \
+            || hits="protected-path check failed: $hits"
           [ -n "$hits" ] || exit 0
           # Back to draft so it cannot merge until a human looks.
           gh pr ready "$PR" --repo "$GITHUB_REPOSITORY" --undo || true

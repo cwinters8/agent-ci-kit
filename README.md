@@ -22,9 +22,11 @@ The kit (copy these into your repo)
     claude-review-respond.yml answers each review on an agent PR as it lands            (module 2)
     claude-review-sweep.yml  daily triage of every open review comment                   (module 2)
     pr-checks.yml            the same checks the agent runs, skipped on docs-only PRs    (module 4)
+    kit-checks.yml           lints the workflows, tests the guardrail scripts
     build-image.yml          source-hash-gated container builds                          (module 4)
   .github/ISSUE_TEMPLATE/agent-fix.yml   a bug report an unattended agent can act on
   .github/actions/project-setup/   toolchain + install from agent-ci.json, shared by every workflow
+  .github/scripts/         protected-path guard and review cap count, with tests
   .claude/
     agent-ci.json            your toolchain and commands, read by every workflow
     skills/                  pr-preflight, review-sweep, code-review, security-review, action-versions

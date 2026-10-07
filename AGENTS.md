@@ -84,6 +84,7 @@ Every error body is `{"error": "..."}` with `Content-Type: application/json`.
 | `claude.yml` | `@claude` in a comment or review | follow-up edits on the same branch; the human-in-the-loop review gate |
 | `claude-review-respond.yml` | a review submitted on a fix-workflow PR (`claude/issue-*`) | runs `review-sweep` on that PR right away, no `@claude` needed; per-PR daily cap |
 | `claude-review-sweep.yml` | daily schedule, or manual | triage every open review comment to fixed or declined; flag PRs ready to merge |
+| `kit-checks.yml` | PRs touching `.github/` | actionlint, shellcheck, and the tests for the guardrail scripts in `.github/scripts/` |
 | `pr-checks.yml` | PRs touching Go code | `commands.check` from `.claude/agent-ci.json` |
 | `build-image.yml` | pushes to `main` touching Go code | source-hash gate over `image.inputs`: reuse a matching image, build only when inputs changed |
 

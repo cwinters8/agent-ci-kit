@@ -1,0 +1,35 @@
+# Checks for the kit itself: workflow syntax, and the tests for the shell
+# scripts the agent workflows run (protected-path guard, review cap count).
+# Those scripts are guardrails, so a later edit that weakens one should fail
+# here, not in an agent run.
+
+name: Kit checks
+
+on:
+  pull_request:
+    paths:
+      - '.github/**'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      # Shellcheck runs on the scripts below; inside workflow YAML it would
+      # mostly flag jq programs in single quotes, which is intended.
+      - name: Lint workflows
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color -shellcheck=
+
+      - name: Lint scripts
+        run: shellcheck -S warning .github/scripts/*.sh
+
+      - name: Test scripts
+        run: bash .github/scripts/test-review-respond.sh
