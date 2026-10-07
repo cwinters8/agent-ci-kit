@@ -41,7 +41,7 @@ jobs:
     if: >-
       startsWith(github.event.pull_request.head.ref, vars.AGENT_REVIEW_BRANCH_PREFIX || 'claude/issue-') &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      !contains(github.event.review.body, '@claude') &&
+      (github.event.review.user.type == 'Bot' || !contains(github.event.review.body, '@claude')) &&
       (
         (github.event.review.user.type == 'User' &&
           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)) ||
@@ -66,18 +66,23 @@ jobs:
           sparse-checkout: .github/scripts
           persist-credentials: false
 
-      # claude.yml answers `@claude` in an inline comment (matched without
-      # case, as claude.yml and the action do). Leave those reviews to it
-      # rather than running two agents on one review. Bare approvals still run:
-      # an approval can be the verdict that makes the PR ready to merge.
+      # claude.yml answers a maintainer's `@claude` in an inline comment
+      # (matched without case, as claude.yml and the action do). Leave those
+      # reviews to it rather than running two agents on one review. claude.yml
+      # allows no bots, so a bot's `@claude` is answered here. Bare approvals
+      # still run: an approval can be the verdict that makes the PR ready.
       - name: Skip reviews claude.yml handles
         id: content
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           REVIEW: ${{ github.event.review.id }}
+          REVIEWER_TYPE: ${{ github.event.review.user.type }}
         run: |
-          bodies="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews/$REVIEW/comments" --jq '.[].body')"
+          bodies=""
+          if [ "$REVIEWER_TYPE" = User ]; then
+            bodies="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews/$REVIEW/comments" --jq '.[].body')"
+          fi
           if grep -qi '@claude' <<< "$bodies"; then
             echo "Inline @claude mention; claude.yml handles this review."
             echo "skip=true" >> "$GITHUB_OUTPUT"

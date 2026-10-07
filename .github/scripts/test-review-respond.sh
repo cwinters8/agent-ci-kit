@@ -47,14 +47,19 @@ mkdir -p cfg; echo s > cfg/.env.local; commit 'env file' > /dev/null
 expect ".env anywhere is caught" "cfg/.env.local" "$(check)"
 git reset -q --hard HEAD~1
 
+printf x > $'.github/evil\n.yml'; commit 'newline in a name' > /dev/null
+expect "name with a newline under .github/ is caught" "$(printf %q $'.github/evil\n.yml')" "$(check)"
+git reset -q --hard HEAD~1
+
 echo p > "docs/team's-config/a.md"; commit 'extra path' > /dev/null
 expect "extra pattern with an apostrophe is caught" "docs/team's-config/a.md" \
   "$(PROTECTED_EXTRA="^(docs/team's-config/)" check)"
 expect "extra pattern unset ignores it" "" "$(check)"
 git reset -q --hard HEAD~1
 
-# A human already put a protected file on the branch; the agent leaves it alone.
-mkdir -p .claude; echo h > .claude/human.md
+# A human already put protected files on the branch; the agent leaves them
+# alone. One name is also a glob that matches the other.
+mkdir -p .claude; echo h > .claude/human.md; echo g > '.claude/h*.md'
 before="$(commit 'human adds config')"
 echo c >> app.go; commit 'agent change' > /dev/null
 expect "untouched protected file from a human passes" "" "$(check)"
@@ -97,21 +102,26 @@ for p in "${pages[@]}"; do [ -e "$p" ] && jq -r "$expr" "$p"; done
 GH
 chmod +x "$tmp/bin/gh"
 
+T='"updated_at":"2026-01-01T09:00:00Z"'
+Y='"updated_at":"2025-12-31T09:00:00Z"'
 # Page 1: this run (now on attempt 2), a skipped run, a cancelled run that
 # got as far as the responder, and a normal responder run.
-cat > "$tmp/fx/runs-1.json" <<'J'
+cat > "$tmp/fx/runs-1.json" <<J
 {"workflow_runs":[
- {"id":100,"conclusion":null},
- {"id":1,"conclusion":"skipped"},
- {"id":2,"conclusion":"cancelled"},
- {"id":3,"conclusion":"success"}]}
+ {"id":100,"conclusion":null,$T},
+ {"id":1,"conclusion":"skipped",$T},
+ {"id":2,"conclusion":"cancelled",$T},
+ {"id":3,"conclusion":"success",$T}]}
 J
-# Page 2: a gate-only run and a failed responder run.
-cat > "$tmp/fx/runs-2.json" <<'J'
-{"workflow_runs":[{"id":4,"conclusion":"success"},{"id":5,"conclusion":"failure"}]}
+# Page 2: a gate-only run, a failed responder run, a run from yesterday
+# rerun today, and a run last touched yesterday.
+cat > "$tmp/fx/runs-2.json" <<J
+{"workflow_runs":[{"id":4,"conclusion":"success",$T},{"id":5,"conclusion":"failure",$T},
+ {"id":6,"conclusion":"success",$T},{"id":7,"conclusion":"success",$Y}]}
 J
-R='"name":"Claude triages the review"'
-G='"name":"Scope and budget"'
+R='"name":"Claude triages the review","started_at":"2026-01-01T10:00:00Z"'
+RY='"name":"Claude triages the review","started_at":"2025-12-31T10:00:00Z"'
+G='"name":"Scope and budget","started_at":"2026-01-01T10:00:00Z"'
 # Attempt 1 of this run responded; attempt 2 (now) has not yet.
 cat > "$tmp/fx/jobs-100-1.json" <<J
 {"jobs":[{"id":1001,"run_id":100,"run_attempt":1,$R,"conclusion":"success"},
@@ -136,12 +146,22 @@ J
 cat > "$tmp/fx/jobs-5-2.json" <<J
 {"jobs":[{"id":52,"run_id":5,"run_attempt":1,$R,"conclusion":"failure"}]}
 J
+# Yesterday's attempt does not count toward today; today's rerun does.
+cat > "$tmp/fx/jobs-6-1.json" <<J
+{"jobs":[{"id":61,"run_id":6,"run_attempt":1,$RY,"conclusion":"success"},
+ {"id":62,"run_id":6,"run_attempt":2,$R,"conclusion":"success"}]}
+J
+# Never fetched (last updated yesterday); counted if it were.
+cat > "$tmp/fx/jobs-7-1.json" <<J
+{"jobs":[{"id":71,"run_id":7,"run_attempt":1,$R,"conclusion":"success"}]}
+J
 
 got="$(PATH="$tmp/bin:$PATH" FIXTURES="$tmp/fx" GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=100 GITHUB_RUN_ATTEMPT=2 \
   RESPONDER="Claude triages the review" "$here/review-responses-today.sh" claude/issue-1 2026-01-01)"
-# Counted: run 100 attempt 1, run 2, run 3, run 5. Not: skipped run 1 (never
-# fetched), run 4 (gate only), run 100 attempt 2 (this one).
-expect "cap counts responder jobs across pages, attempts and cancellations" "4" "$got"
+# Counted: run 100 attempt 1, run 2, run 3, run 5, run 6 attempt 2. Not:
+# skipped run 1 and stale run 7 (never fetched), run 4 (gate only), run 6
+# attempt 1 (yesterday), run 100 attempt 2 (this one).
+expect "cap counts today's responder jobs across pages, attempts, reruns and cancellations" "5" "$got"
 
 echo
 if [ "$failures" -gt 0 ]; then echo "$failures failed"; exit 1; fi

@@ -11,7 +11,7 @@ by asking the model nicely.
 | Large diffs are flagged | diffs over `AGENT_MAX_DIFF_LINES` get `agent:large-diff` |
 | Agent cannot browse the web | `--disallowedTools WebFetch,WebSearch` (blocks prompt injection from fetched pages and data exfiltration by URL) |
 | Agent can only run listed commands | `--allowedTools` allowlist built from the named `commands` and `allow`, read from the default branch so a PR cannot widen it; anything else is denied in a headless run |
-| Agent never merges or pushes to main | no merge tool granted: the review workflows allow only the `gh pr` subcommands they need and deny `gh pr merge` and merge API calls (a command-text filter, not a hard boundary); branch protection on main requiring a human approval is the real one (set this up) |
+| Agent never merges or pushes to main | the review workflows allow only the `gh pr` subcommands they need and deny `gh pr merge` and merge API calls. That stops an accidental merge, not a deliberate one: the agent runs the project's checks, which it can edit, with a token that can push, so it can run any command. Only a rule on main that the agent's token cannot satisfy stops a merge. The Quickstart's protection (pull request required, no approval) blocks direct pushes to main, not merges |
 | PRs open as drafts | `gh pr create --draft` in the workflow |
 | Credentials are step-scoped | secrets passed to the action step only, never a job-level `env:` |
 
