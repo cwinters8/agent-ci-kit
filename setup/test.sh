@@ -66,6 +66,9 @@ EOF
 
 run_doctor() { (cd "$1" && bash "$doctor" 2>&1) || true; }
 
+# Leaves claude.yml as the only agent workflow, however many the kit ships.
+only_claude_yml() { find "$1/.github/workflows" -name 'claude?*.yml' ! -name claude.yml -delete; }
+
 # A stand-in for `gh api PATH [--paginate] [--jq EXPR]` that answers from JSON
 # files in $FAKE_GH_DIR (PATH with / as _, query string dropped) and fails like
 # a 404 when there is none. Lets the GitHub checks run without a network.
@@ -232,8 +235,8 @@ expect "doctor: malformed .claude/settings.json fails" "$out" \
   "+✗ .claude/settings.json is not valid JSON"
 
 dir="$(node_repo claude-only)"
-rm "$dir/.github/workflows/claude-fix-issue.yml" "$dir/.github/workflows/claude-review-sweep.yml" \
-  "$dir/.github/ISSUE_TEMPLATE/agent-fix.yml"
+only_claude_yml "$dir"
+rm "$dir/.github/ISSUE_TEMPLATE/agent-fix.yml"
 out="$(run_doctor "$dir")"
 expect "doctor: the fix workflow's files are optional when it is not installed" "$out" \
   "+✓ 1 agent workflow(s)" "-agent-fix.yml"
@@ -286,7 +289,7 @@ gh_dir="$(github_ok claude-only)"
 echo '{"secrets": [{"name": "ANTHROPIC_API_KEY"}]}' > "$gh_dir/repos_acme_app_actions_secrets.json"
 echo '[]' > "$gh_dir/repos_acme_app_labels.json"
 dir="$(node_repo gh-claude-only)"
-rm "$dir/.github/workflows/claude-fix-issue.yml" "$dir/.github/workflows/claude-review-sweep.yml"
+only_claude_yml "$dir"
 out="$(github_doctor "$dir" "$gh_dir")"
 expect "doctor: secrets and labels follow the installed workflows" "$out" \
   "+✓ Claude credential secret set" "-AGENT_PR_TOKEN" "-missing labels"
