@@ -1,0 +1,4 @@
+# Who must approve every PR to the default branch (README Quickstart step 5).
+# The agent's GitHub identity is never a code owner, so it cannot approve or
+# merge. Replace the handle with yours, or a team, when you adopt the kit.
+* @cwinters8
