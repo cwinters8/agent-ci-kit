@@ -6,11 +6,12 @@ guide explains the reasoning; this page is the reference.
 | Control | Where | Bounds | Default |
 | --- | --- | --- | --- |
 | Model routing | `claude-fix-issue.yml` → `Route model` | price per token | Sonnet; Opus only via `agent:fix-opus` |
-| Turn cap | `--max-turns` in each workflow | one run's length | 30 Sonnet / 40 Opus / 20 interactive / 60 sweep |
-| Wall-clock cap | `timeout-minutes` | a stuck run | 30 fix / 20 interactive / 45 sweep |
+| Turn cap | `--max-turns` in each workflow | one run's length | 30 Sonnet / 40 Opus / 20 interactive / 60 sweep / 20 PR review |
+| Wall-clock cap | `timeout-minutes` | a stuck run | 30 fix / 20 interactive / 45 sweep / 15 PR review |
 | Daily run cap | `claude-fix-issue.yml` → `Check daily run cap` | a bad day | 10 runs per UTC day |
-| Human trigger | label / `@claude`, write access required | who can spend | maintainers only |
+| Human trigger | label / `@claude`, write access required | who can spend | maintainers only; PR reviews run on each push to a ready PR |
 | Batched review | `claude-review-sweep.yml` | review-comment bursts | one session per day, not per comment |
+| PR review scope | `claude-code-review.yml` | reviews of work in progress | skips drafts; a newer push cancels a running review; `AGENT_MAX_TURNS_CODE_REVIEW` |
 | No polling | AGENTS.md → Session behavior | idle sessions | never |
 | Path filters | `pr-checks.yml`, `build-image.yml` `paths:` | CI on docs/config-only PRs | Go code only |
 | Source-hash gate | `build-image.yml` | image builds | build only when shipped inputs change; tests and comments-in-tests never rebuild |

@@ -83,6 +83,7 @@ Every error body is `{"error": "..."}` with `Content-Type: application/json`.
 | `claude-fix-issue.yml` | label `agent:fix` (Sonnet) or `agent:fix-opus` | issue → `claude/` branch → draft PR, behind a daily run cap and protected-path guardrails |
 | `claude.yml` | `@claude` in a comment or review | follow-up edits on the same branch; the human-in-the-loop review gate |
 | `claude-review-sweep.yml` | daily schedule, or manual | triage every open review comment to fixed or declined; flag PRs ready to merge |
+| `claude-code-review.yml` | a PR opened, marked ready, or pushed to | runs `code-review` on the PR and posts one comment; never edits or pushes |
 | `pr-checks.yml` | PRs touching Go code | `commands.check` from `.claude/agent-ci.json` |
 | `build-image.yml` | pushes to `main` touching Go code | source-hash gate over `image.inputs`: reuse a matching image, build only when inputs changed |
 

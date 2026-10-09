@@ -1,0 +1,62 @@
+# Claude reviews every PR when it opens, leaves draft, or gets new commits.
+#
+# A second automated reviewer next to Codex, so reviews keep landing when one
+# runs out of usage. It runs the `code-review` skill and posts one comment per
+# head commit: findings, or a clean verdict the daily sweep reads as approval.
+# It never edits or pushes. The agent that shipped the PR answers its findings
+# (a Claude Code session subscribed to the PR, or the daily sweep).
+#
+# Cost: one run per push to a ready PR. A newer push cancels a review still
+# running, and drafts are skipped, so an agent iterating on a draft costs
+# nothing here.
+
+name: Claude code review
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+concurrency:
+  group: claude-code-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    # Fork PRs get no secrets; review them by hand.
+    if: >-
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Agent pushes arrive as claude[bot]; review those too. This job
+          # cannot push, so it cannot trigger itself.
+          allowed_bots: 'claude[bot]'
+          prompt: |
+            Run the code-review skill in .claude/skills/code-review/ on
+            ${{ github.repository }} PR #${{ github.event.pull_request.number }}.
+            Use the gh CLI for GitHub reads and to post the comment.
+            Review only: do not edit files, commit or push.
+            Never write "@claude" in the comment; that would start claude.yml.
+          claude_args: >-
+            --model ${{ vars.AGENT_CODE_REVIEW_MODEL || 'sonnet' }}
+            --max-turns ${{ vars.AGENT_MAX_TURNS_CODE_REVIEW || '20' }}
+            --allowedTools "Read,Glob,Grep,LS,Skill,Task,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*)"
+            --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch"
