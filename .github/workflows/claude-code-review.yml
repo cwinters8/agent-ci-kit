@@ -85,7 +85,7 @@ jobs:
           claude_args: >-
             --model ${{ vars.AGENT_CODE_REVIEW_MODEL || 'opus' }}
             --max-turns ${{ vars.AGENT_MAX_TURNS_CODE_REVIEW || '20' }}
-            --allowedTools "Read,Glob,Grep,LS,Skill,Task,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(git log:*),Bash(git blame:*)"
+            --allowedTools "Read,Glob,Grep,LS,Skill,Task,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh release list:*),Bash(gh pr comment:*),Bash(git log:*),Bash(git blame:*)"
             --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch"
 
       # The action reports success when it skips without running Claude, and
@@ -116,7 +116,8 @@ jobs:
             exit 0
           fi
           found=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
-            --jq ".[] | select((.body | contains(\"### Code review\")) and (.body | contains(\"$HEAD_SHA\"))) | .id")
+            --jq ".[] | select(.user.login == \"github-actions[bot]\") |
+              select((.body | contains(\"### Code review\")) and (.body | contains(\"$HEAD_SHA\"))) | .id")
           if [ -z "$found" ]; then
             echo "::error::Claude finished without posting a review for $HEAD_SHA."
             exit 1
