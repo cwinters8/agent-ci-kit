@@ -98,7 +98,7 @@ Repo variables (Settings → Variables), all optional:
 | `AGENT_MAX_TURNS_SONNET` / `_OPUS` | 30 / 40 | per fix run |
 | `AGENT_MAX_TURNS_INTERACTIVE` | 20 | per `@claude` run |
 | `AGENT_MAX_TURNS_SWEEP` | 60 | per daily sweep |
-| `AGENT_MAX_TURNS_CODE_REVIEW` / `AGENT_CODE_REVIEW_MODEL` | 20 / sonnet | per PR review |
+| `AGENT_MAX_TURNS_CODE_REVIEW` / `AGENT_CODE_REVIEW_MODEL` | 20 / opus | per PR review |
 | `AGENT_MAX_DIFF_LINES` | 400 | above this, PR gets `agent:large-diff` |
 | `AGENT_INTERACTIVE_MODEL` / `AGENT_SWEEP_MODEL` | sonnet | |
 

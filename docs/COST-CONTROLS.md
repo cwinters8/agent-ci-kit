@@ -32,6 +32,11 @@ The `Report cost` step prints each run's turns and dollar cost in the job
 summary. Compare a few Sonnet and Opus runs on your own issues before changing
 the default.
 
+PR review is the exception: it defaults to Opus. A review that misses a real
+bug costs more than the tokens saved, and in testing Sonnet returned "no
+issues" in 25 seconds on commits where Codex found real ones. Set
+`AGENT_CODE_REVIEW_MODEL=sonnet` to trade depth for cost.
+
 ## Subscription vs API billing
 
 | | `CLAUDE_CODE_OAUTH_TOKEN` (Pro/Max) | `ANTHROPIC_API_KEY` |

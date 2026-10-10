@@ -83,7 +83,7 @@ jobs:
             review at the current head, still post one comment: "### Code
             review", a blank line, then "Skipped at <full head SHA>: <reason>."
           claude_args: >-
-            --model ${{ vars.AGENT_CODE_REVIEW_MODEL || 'sonnet' }}
+            --model ${{ vars.AGENT_CODE_REVIEW_MODEL || 'opus' }}
             --max-turns ${{ vars.AGENT_MAX_TURNS_CODE_REVIEW || '20' }}
             --allowedTools "Read,Glob,Grep,LS,Skill,Task,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(git log:*),Bash(git blame:*)"
             --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch"
@@ -104,6 +104,11 @@ jobs:
             echo "::error::Claude did not run. The Review step log says why."
             exit 1
           fi
+          # Name each blocked tool call. A review that couldn't run a pass can
+          # still report clean, so these show where to widen --allowedTools.
+          jq -r '.[] | select(.type == "result") | .permission_denials[]? |
+            "::warning::Reviewer was denied \(.tool_name): \(.tool_input | tostring | .[0:200])"' \
+            "$EXECUTION_FILE" 2>/dev/null || true
           pr=$(gh api "repos/$REPO/pulls/$PR")
           if [ "$(jq -r .state <<<"$pr")" != open ] ||
              [ "$(jq -r .head.sha <<<"$pr")" != "$HEAD_SHA" ]; then
