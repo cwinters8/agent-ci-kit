@@ -34,7 +34,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      id-token: write
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -42,10 +41,17 @@ jobs:
           fetch-depth: 1
 
       - name: Review
+        id: review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The job's own token, not the Claude App's. With the App token the
+          # action exits green without reviewing whenever this file differs
+          # from the default branch, so the PR that adds or changes it gets
+          # no review. This token is also capped at the job's permissions:
+          # read code, comment on PRs.
+          github_token: ${{ github.token }}
           # Agent pushes arrive as claude[bot]; review those too. This job
           # cannot push, so it cannot trigger itself.
           allowed_bots: 'claude[bot]'
@@ -55,8 +61,41 @@ jobs:
             Use the gh CLI for GitHub reads and to post the comment.
             Review only: do not edit files, commit or push.
             Never write "@claude" in the comment; that would start claude.yml.
+            If the skill skips this PR for any reason other than an existing
+            review at the current head, still post one comment: "### Code
+            review", a blank line, then "Skipped at <full head SHA>: <reason>."
           claude_args: >-
             --model ${{ vars.AGENT_CODE_REVIEW_MODEL || 'sonnet' }}
             --max-turns ${{ vars.AGENT_MAX_TURNS_CODE_REVIEW || '20' }}
             --allowedTools "Read,Glob,Grep,LS,Skill,Task,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*)"
             --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch"
+
+      # The action reports success when it skips without running Claude, and
+      # Claude can finish without posting. Either way no review landed, so
+      # fail the job rather than show a green check.
+      - name: Check a review was posted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Set only when Claude actually ran; a failed run fails the step above.
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -z "$EXECUTION_FILE" ]; then
+            echo "::error::Claude did not run. The Review step log says why."
+            exit 1
+          fi
+          pr=$(gh api "repos/$REPO/pulls/$PR")
+          if [ "$(jq -r .state <<<"$pr")" != open ] ||
+             [ "$(jq -r .head.sha <<<"$pr")" != "$HEAD_SHA" ]; then
+            echo "::notice::PR closed or got new commits during the review; nothing to check."
+            exit 0
+          fi
+          found=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq ".[] | select((.body | contains(\"### Code review\")) and (.body | contains(\"$HEAD_SHA\"))) | .id")
+          if [ -z "$found" ]; then
+            echo "::error::Claude finished without posting a review for $HEAD_SHA."
+            exit 1
+          fi
+          echo "Review posted for $HEAD_SHA."
