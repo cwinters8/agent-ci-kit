@@ -14,7 +14,9 @@ name: Claude code review
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
+    # converted_to_draft only cancels a review still running: the new run
+    # joins the concurrency group below, then its job skips the draft.
+    types: [opened, reopened, ready_for_review, synchronize, converted_to_draft]
 
 concurrency:
   group: claude-code-review-${{ github.event.pull_request.number }}
@@ -83,7 +85,7 @@ jobs:
           claude_args: >-
             --model ${{ vars.AGENT_CODE_REVIEW_MODEL || 'sonnet' }}
             --max-turns ${{ vars.AGENT_MAX_TURNS_CODE_REVIEW || '20' }}
-            --allowedTools "Read,Glob,Grep,LS,Skill,Task,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(git log:*),Bash(git blame:*)"
+            --allowedTools "Read,Glob,Grep,LS,Skill,Task,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(git log:*),Bash(git blame:*)"
             --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch"
 
       # The action reports success when it skips without running Claude, and
