@@ -71,7 +71,13 @@ serves the API on `:8080`.
 
 ## Adopting it in your project
 
-Copy the kit files, then fill in three files. The workflows themselves stay
+The fast way: let Claude Code do it. From this checkout, run
+`bash setup/install.sh` once, then open Claude Code in your own repo and run
+`/adopt-kit`. It reads your code, asks what it cannot work out, fills in the
+files below, prepares GitHub, and opens a setup PR for you to review. Run
+`/adopt-kit doctor` any time to check a setup.
+
+By hand: copy the kit files, then fill in three files. The workflows themselves stay
 as they are.
 
 1. `.claude/agent-ci.json`: your toolchain, install command, checks, the

@@ -49,6 +49,8 @@ the server empties it. Routes use Go 1.22+ `net/http` method patterns.
   and protected paths the workflows read. Schema alongside;
   reference in `docs/PROJECT-CONFIG.md`.
 - `.claude/project-profile.md`: the project facts the vendored skills read.
+- `setup/`: the `adopt-kit` skill buyers install to set the kit up in their
+  own repo, and its `doctor.sh` checker. Authored here, not vendored.
 - `.claude/skills/`: vendored skills. Never hand-edit; see
   [Shared skills](#shared-skills).
 - `.github/workflows/claude-*.yml`: the agent workflows. See [Agents in CI](#agents-in-ci).
@@ -70,7 +72,8 @@ Every error body is `{"error": "..."}` with `Content-Type: application/json`.
 
 ## Commands
 
-- `make check`: gofmt check, `go vet`, `go test -race`. Run before every commit.
+- `make check`: gofmt check, `go vet`, `go test -race`, and `setup/test.sh`
+  (the adopt-kit installer and doctor). Run before every commit.
   It is `commands.check` in `.claude/agent-ci.json`, which also names the
   `format`, `lint`, `test` and `build` commands.
 - `make run`: start the server on `:8080`.

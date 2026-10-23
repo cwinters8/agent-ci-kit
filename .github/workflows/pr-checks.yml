@@ -17,6 +17,7 @@ on:
       - go.mod
       - go.sum
       - Makefile
+      - setup/**
       - .claude/agent-ci.json
       - .github/actions/project-setup/**
       - .github/workflows/pr-checks.yml

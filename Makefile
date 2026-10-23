@@ -1,8 +1,8 @@
 # The same checks CI and the agents run. `make check` passing locally means
 # pr-checks.yml will pass.
-.PHONY: check fmt fmt-check vet test run build image
+.PHONY: check fmt fmt-check vet test test-setup run build image
 
-check: fmt-check vet test
+check: fmt-check vet test test-setup
 
 fmt:
 	gofmt -w .
@@ -15,6 +15,9 @@ vet:
 
 test:
 	go test -race -count=1 ./...
+
+test-setup:
+	bash setup/test.sh
 
 run:
 	go run ./cmd/server
