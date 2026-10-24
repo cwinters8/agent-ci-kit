@@ -20,6 +20,7 @@ The kit (copy these into your repo)
     claude-fix-issue.yml     issue -> branch -> draft PR, with routing, caps, guardrails  (modules 1-3)
     claude.yml               @claude follow-ups on PRs: the human review gate            (module 2)
     claude-review-sweep.yml  daily triage of every open review comment                   (module 2)
+    claude-code-review.yml   Claude reviews each PR push, alongside Codex                (module 2)
     pr-checks.yml            the same checks the agent runs, skipped on docs-only PRs    (module 4)
     build-image.yml          source-hash-gated container builds                          (module 4)
   .github/ISSUE_TEMPLATE/agent-fix.yml   a bug report an unattended agent can act on
@@ -103,6 +104,7 @@ Repo variables (Settings → Variables), all optional:
 | `AGENT_MAX_TURNS_SONNET` / `_OPUS` | 30 / 40 | per fix run |
 | `AGENT_MAX_TURNS_INTERACTIVE` | 20 | per `@claude` run |
 | `AGENT_MAX_TURNS_SWEEP` | 60 | per daily sweep |
+| `AGENT_MAX_TURNS_CODE_REVIEW` / `AGENT_CODE_REVIEW_MODEL` | 20 / opus | per PR review |
 | `AGENT_MAX_DIFF_LINES` | 400 | above this, PR gets `agent:large-diff` |
 | `AGENT_INTERACTIVE_MODEL` / `AGENT_SWEEP_MODEL` | sonnet | |
 

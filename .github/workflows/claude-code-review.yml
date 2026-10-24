@@ -1,0 +1,125 @@
+# Claude reviews every PR when it opens, leaves draft, or gets new commits.
+#
+# A second automated reviewer next to Codex, so reviews keep landing when one
+# runs out of usage. It runs the `code-review` skill and posts one comment per
+# head commit: findings, or a clean verdict the daily sweep reads as approval.
+# It never edits or pushes. The agent that shipped the PR answers its findings
+# (a Claude Code session subscribed to the PR, or the daily sweep).
+#
+# Cost: one run per push to a ready PR. A newer push cancels a review still
+# running, and drafts are skipped, so an agent iterating on a draft costs
+# nothing here.
+
+name: Claude code review
+
+on:
+  pull_request:
+    # converted_to_draft only cancels a review still running: the new run
+    # joins the concurrency group below, then its job skips the draft.
+    types: [opened, reopened, ready_for_review, synchronize, converted_to_draft]
+
+concurrency:
+  group: claude-code-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    # Fork PRs get no secrets; review them by hand. Other bots' pushes are
+    # skipped too: Dependabot gets only Dependabot secrets, and the action
+    # refuses any bot outside allowed_bots.
+    if: >-
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.actor == 'claude[bot]' || !endsWith(github.actor, '[bot]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          # Full history for the skill's git log / git blame pass.
+          fetch-depth: 0
+
+      # The action restores CLAUDE.md and .claude/ from the base branch so a
+      # PR can't rewrite the rules it is reviewed by. CLAUDE.md imports
+      # AGENTS.md, which the action leaves as the PR wrote it, so restore
+      # that too. The PR's version still shows in the diff.
+      - name: Use the base branch's AGENTS.md
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          rm -f AGENTS.md
+          git checkout "$BASE_SHA" -- AGENTS.md 2>/dev/null ||
+            echo "No AGENTS.md on the base branch."
+
+      - name: Review
+        id: review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The job's own token, not the Claude App's. With the App token the
+          # action exits green without reviewing whenever this file differs
+          # from the default branch, so the PR that adds or changes it gets
+          # no review. This token is also capped at the job's permissions:
+          # read code, comment on PRs.
+          github_token: ${{ github.token }}
+          # Agent pushes arrive as claude[bot]; review those too. This job
+          # cannot push, so it cannot trigger itself.
+          allowed_bots: 'claude[bot]'
+          prompt: |
+            Run the code-review skill in .claude/skills/code-review/ on
+            ${{ github.repository }} PR #${{ github.event.pull_request.number }}.
+            Use the gh CLI for GitHub reads and to post the comment.
+            Review only: do not edit files, commit or push.
+            Never write "@claude" in the comment; that would start claude.yml.
+            If the skill skips this PR for any reason other than an existing
+            review at the current head, still post one comment: "### Code
+            review", a blank line, then "Skipped at <full head SHA>: <reason>."
+          claude_args: >-
+            --model ${{ vars.AGENT_CODE_REVIEW_MODEL || 'opus' }}
+            --max-turns ${{ vars.AGENT_MAX_TURNS_CODE_REVIEW || '20' }}
+            --allowedTools "Read,Glob,Grep,LS,Skill,Task,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh release list:*),Bash(gh pr comment:*),Bash(git log:*),Bash(git blame:*)"
+            --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,WebFetch,WebSearch"
+
+      # The action reports success when it skips without running Claude, and
+      # Claude can finish without posting. Either way no review landed, so
+      # fail the job rather than show a green check.
+      - name: Check a review was posted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Set only when Claude actually ran; a failed run fails the step above.
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -z "$EXECUTION_FILE" ]; then
+            echo "::error::Claude did not run. The Review step log says why."
+            exit 1
+          fi
+          # Name each blocked tool call. A review that couldn't run a pass can
+          # still report clean, so these show where to widen --allowedTools.
+          jq -r '.[] | select(.type == "result") | .permission_denials[]? |
+            "::warning::Reviewer was denied \(.tool_name): \(.tool_input | tostring | .[0:200])"' \
+            "$EXECUTION_FILE" 2>/dev/null || true
+          pr=$(gh api "repos/$REPO/pulls/$PR")
+          if [ "$(jq -r .state <<<"$pr")" != open ] ||
+             [ "$(jq -r .head.sha <<<"$pr")" != "$HEAD_SHA" ]; then
+            echo "::notice::PR closed or got new commits during the review; nothing to check."
+            exit 0
+          fi
+          found=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\") |
+              select((.body | contains(\"### Code review\")) and (.body | contains(\"$HEAD_SHA\"))) | .id")
+          if [ -z "$found" ]; then
+            echo "::error::Claude finished without posting a review for $HEAD_SHA."
+            exit 1
+          fi
+          echo "Review posted for $HEAD_SHA."
