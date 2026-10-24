@@ -27,7 +27,61 @@ func New(s *store.Store, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /todos/{id}", h.get)
 	mux.HandleFunc("PATCH /todos/{id}", h.update)
 	mux.HandleFunc("DELETE /todos/{id}", h.delete)
-	return logRequests(log, mux)
+	return logRequests(log, jsonMuxErrors(mux))
+}
+
+// jsonMuxErrors replaces the mux's plain-text 404 and 405 responses with the
+// API's JSON error body. The mux writes those itself, so handlers never see
+// the request. The 405 keeps the Allow header the mux computed.
+func jsonMuxErrors(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Handler would canonicalize "*" into a redirect; the mux itself
+		// answers asterisk-form requests with 400.
+		if r.RequestURI == "*" {
+			writeError(w, http.StatusBadRequest, "bad request")
+			return
+		}
+		h, pattern := mux.Handler(r)
+		if pattern != "" {
+			// ServeHTTP, not h: only the mux populates r.PathValue.
+			mux.ServeHTTP(w, r)
+			return
+		}
+		c := &captureWriter{header: http.Header{}, status: http.StatusOK}
+		h.ServeHTTP(c, r)
+		switch c.status {
+		case http.StatusNotFound:
+			writeError(w, http.StatusNotFound, "not found")
+		case http.StatusMethodNotAllowed:
+			if allow := c.header.Get("Allow"); allow != "" {
+				w.Header().Set("Allow", allow)
+			}
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		default:
+			// Redirects for unclean paths: replay the mux's own response.
+			for k, v := range c.header {
+				w.Header()[k] = v
+			}
+			w.WriteHeader(c.status)
+			_, _ = w.Write(c.body)
+		}
+	})
+}
+
+// captureWriter records a response so jsonMuxErrors can inspect it.
+type captureWriter struct {
+	header http.Header
+	status int
+	body   []byte
+}
+
+func (c *captureWriter) Header() http.Header { return c.header }
+
+func (c *captureWriter) WriteHeader(code int) { c.status = code }
+
+func (c *captureWriter) Write(b []byte) (int, error) {
+	c.body = append(c.body, b...)
+	return len(b), nil
 }
 
 type handler struct {
