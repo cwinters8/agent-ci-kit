@@ -24,6 +24,7 @@ The kit (copy these into your repo)
     pr-checks.yml            the same checks the agent runs, skipped on docs-only PRs    (module 4)
     build-image.yml          source-hash-gated container builds                          (module 4)
   .github/ISSUE_TEMPLATE/agent-fix.yml   a bug report an unattended agent can act on
+  .github/CODEOWNERS       who must approve merges to main; never the agent
   .github/actions/project-setup/   toolchain + install from agent-ci.json, shared by every workflow
   .claude/
     agent-ci.json            your toolchain and commands, read by every workflow
@@ -49,9 +50,10 @@ The sample app (replace with yours)
    - `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token`; uses your Pro/Max plan) **or** `ANTHROPIC_API_KEY` (API billing)
    - `AGENT_PR_TOKEN` (required): a fine-grained personal access token on your
      own account (GitHub has no repo-owned tokens), limited to this repo only.
-     Permissions: Contents and Pull requests read/write; add Issues read/write
-     and Actions read-only if you use the daily review sweep. The workflow opens
-     agent PRs with it. The built-in `GITHUB_TOKEN` is not a drop-in
+     Permissions: Contents and Pull requests read/write. The fix workflow
+     opens agent PRs with it, in a step after the agent has finished; no
+     agent ever gets it, since it acts as you and you can bypass the rule in
+     step 5. The built-in `GITHUB_TOKEN` is not a drop-in
      replacement: GitHub blocks Actions from creating PRs unless you turn on
      "Allow GitHub Actions to create and approve pull requests", and even then
      CI on those PRs waits until someone clicks "Approve workflows to run". If
@@ -59,12 +61,21 @@ The sample app (replace with yours)
      PR" step at `github.token`. If the PR step fails, the workflow comments a
      link on the issue so you can open the PR by hand.
 4. Create labels: `agent:fix`, `agent:fix-opus`, `agent:needs-human`, `agent:large-diff`.
-5. Protect `main`: require a pull request, but **not** an approving review.
-   Agent PRs are opened with your PAT, so GitHub lists you as the author, and
-   you cannot approve your own PR. To keep required approvals, put a second
-   (bot) account's PAT in `AGENT_PR_TOKEN`, or use your own GitHub App and mint
-   its token in the workflow with `actions/create-github-app-token`. App tokens
-   expire after an hour, so one pasted into the secret stops working.
+5. Protect `main` with a branch ruleset (Settings → Rules → Rulesets):
+   require a pull request with 1 approval, **review from Code Owners**, and
+   **approval of the most recent reviewable push**, and add the Repository
+   admin role to the bypass list. Without the last one, an agent push after
+   your approval rides on that approval and can merge unreviewed. Put your
+   handle in `.github/CODEOWNERS`. This is what stops an agent merging: it
+   pushes with a token that can merge, and it runs your checks, which it can
+   edit, so no command filter holds. Code owner review does, because the agent
+   is never a code owner and cannot bypass. Agent PRs are opened with your
+   PAT, so GitHub lists you as the author and you cannot approve them; merge
+   them with the bypass option only admins get. To merge through a normal
+   approval instead, put a second (bot) account's PAT in `AGENT_PR_TOKEN`, or
+   use your own GitHub App and mint its token in the workflow with
+   `actions/create-github-app-token`. App tokens expire after an hour, so one
+   pasted into the secret stops working.
 6. Open a bug with the "Bug for the agent" template and label it `agent:fix`.
 
 Locally: `make check` runs exactly what CI and the agents run. `make run`

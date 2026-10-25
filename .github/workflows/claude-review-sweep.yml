@@ -76,7 +76,9 @@ jobs:
           claude_args: >-
             --model ${{ vars.AGENT_SWEEP_MODEL || 'sonnet' }}
             --max-turns ${{ vars.AGENT_MAX_TURNS_SWEEP || '60' }}
-            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Skill,Bash(gh pr:*),Bash(gh api:*),Bash(gh run:*),${{ steps.project.outputs.allowed-bash }},Bash(git:*)"
-            --disallowedTools "WebFetch,WebSearch"
-        env:
-          GH_TOKEN: ${{ secrets.AGENT_PR_TOKEN || github.token }}
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Skill,Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr checks:*),Bash(gh pr comment:*),Bash(gh pr ready:*),Bash(gh pr create:*),Bash(gh api:*),Bash(gh run:*),${{ steps.project.outputs.allowed-bash }},Bash(git:*)"
+            --disallowedTools "WebFetch,WebSearch,Bash(gh pr merge:*),Bash(gh api *merge*),Bash(gh api *Merge*)"
+        # No AGENT_PR_TOKEN here. The action gives the agent its own token
+        # anyway, and the PAT acts as you, an admin who can bypass the code
+        # owner rule on main, so it must never be in a process the agent can
+        # read.

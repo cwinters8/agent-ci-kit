@@ -10,7 +10,7 @@ by asking the model nicely.
 | Large diffs are flagged | diffs over `AGENT_MAX_DIFF_LINES` get `agent:large-diff` |
 | Agent cannot browse the web | `--disallowedTools WebFetch,WebSearch` (blocks prompt injection from fetched pages and data exfiltration by URL) |
 | Agent can only run listed commands | `--allowedTools` allowlist built from the named `commands` and `allow`, read from the default branch so a PR cannot widen it; anything else is denied in a headless run |
-| Agent never merges or pushes to main | no merge tool granted; branch protection on main (set this up) |
+| Agent never merges or pushes to main | a ruleset on main requires a pull request, review from a code owner (`.github/CODEOWNERS`) and approval of the most recent push, and only admins can bypass it (README Quickstart step 5). The agent is never a code owner or an admin, and `AGENT_PR_TOKEN`, which acts as you, is only used in a step after the agent has exited. No workflow grants `gh pr merge`, and the daily sweep denies it and merge API calls, but that stops an accidental merge, not a deliberate one: the agent runs the project's checks, which it can edit, with a token that can push |
 | PRs open as drafts | `gh pr create --draft` in the workflow |
 | Credentials are step-scoped | secrets passed to the action step only, never a job-level `env:` |
 
@@ -23,7 +23,8 @@ installed. On a public repo:
 - Disable the `claude-review-sweep.yml` schedule, or restrict it to PRs by
   maintainers: it reads review text from anyone and can push.
 - Never point agent workflows at a self-hosted runner (see `vps/README.md`).
-- Turn on branch protection requiring review on the default branch.
+- Keep the default-branch ruleset from Quickstart step 5 (code owner review,
+  approval of the most recent push, admins-only bypass).
 - Only `@claude` on PRs whose authors you trust. The run installs the PR's
   dependencies and runs its checks, so the PR's own code (install hooks,
   tests, Makefile) executes in a job that can push. On a private repo every
