@@ -20,7 +20,7 @@ The kit (copy these into your repo)
   .github/workflows/
     claude-fix-issue.yml     issue -> branch -> draft PR, with routing, caps, guardrails
     claude.yml               @claude follow-ups on PRs: the human review gate
-    claude-review-sweep.yml  daily triage of every open review comment
+    claude-review-sweep.yml  daily triage of open review comments (manual, one PR, on public repos)
     claude-code-review.yml   Claude reviews each PR push, alongside Codex
     pr-checks.yml            the same checks the agent runs, skipped on docs-only PRs
     build-image.yml          source-hash-gated container builds

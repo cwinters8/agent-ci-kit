@@ -195,10 +195,14 @@ Fill in:
 - **`.claude/project-profile.md`**: keep every section heading of the kit's
   copy, in order, and rewrite each body for their project. A section with
   nothing to say gets "None." rather than being deleted; the skills read
-  these by heading. In **Repo**, keep the sentence permitting
-  `review-sweep`'s reaction-count approval shortcut only for a private repo
-  with a single maintainer. Otherwise delete it: the sweep would count an
-  outsider's reaction as approval. Doctor fails on it.
+  these by heading. In **Repo**, state whether the repo is public or private
+  and keep the rules tying approvals, declines and clean verdicts to the
+  maintainer and agent logins. The kit's copy is written for a public repo,
+  so the reaction-count approval shortcut is off. For a private repo with a
+  single maintainer, they may turn it on by adding "`review-sweep`'s
+  reaction-count approval shortcut is permitted on that basis." Never on a
+  public repo or with collaborators they do not control: the sweep would
+  count an outsider's reaction as approval. Doctor fails on it.
 - **`AGENTS.md`**: replace the project sections (Project status, What this
   project is, Layout, the sample's API table, Commands) with theirs. Keep the
   agent sections (Agents in CI, QA and code review, Session behavior, Shared
