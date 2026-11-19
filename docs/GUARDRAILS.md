@@ -21,10 +21,20 @@ installed. On a public repo:
 
 - Keep `allowed_non_write_users` unset (the default). Never set it to `*`.
 - `claude-review-sweep.yml` skips its schedule on public repos on its own:
-  it reads review text from anyone and can push. Run it by hand, with the
-  `pr` input set to a PR whose comments you have read.
+  it reads review text from anyone and can push. A manual run there must name
+  one PR in the `pr` input, and the gate refuses fork PRs, whose checks would
+  run a stranger's code with the PAT in the environment. Read that PR's
+  comments before you start it.
+- On a public repo anyone can post a comment shaped like the `code-review`
+  clean verdict or leave a 👎. The project profile's `## Repo` section must
+  tell `review-sweep` to count those only from known identities (the sample
+  profile does).
 - Never point agent workflows at a self-hosted runner (see `vps/README.md`).
-- Turn on branch protection requiring review on the default branch.
+- Protect the default branch as README Quickstart step 5 describes, so
+  nothing reaches it without a pull request.
+- Only label issues `agent:fix` after reading their title and body. The
+  labeler must have write access, but whoever filed the issue wrote the text
+  the agent follows.
 - Only `@claude` on PRs whose authors you trust. The run installs the PR's
   dependencies and runs its checks, so the PR's own code (install hooks,
   tests, Makefile) executes in a job that can push. On a private repo every
