@@ -5,8 +5,9 @@ controls that keep that from becoming a surprise bill.
 
 Label an issue `agent:fix`. An agent picks it up on a GitHub runner, finds the
 bug, makes the smallest fix, runs your checks and opens a draft PR. You review
-it, comment `@claude` for changes, and merge. A daily sweep keeps every PR's
-review comments moving while you are away.
+it, comment `@claude` for changes, and merge. On a private repo, a daily sweep
+keeps every PR's review comments moving while you are away; on a public one
+you run it by hand.
 
 This repo is a working sample: a small Go todo API with the whole kit wired
 around it. Fork it to watch the agents work, then copy the kit files into your
@@ -17,12 +18,12 @@ own project.
 ```
 The kit (copy these into your repo)
   .github/workflows/
-    claude-fix-issue.yml     issue -> branch -> draft PR, with routing, caps, guardrails  (modules 1-3)
-    claude.yml               @claude follow-ups on PRs: the human review gate            (module 2)
-    claude-review-sweep.yml  daily triage of every open review comment                   (module 2)
-    claude-code-review.yml   Claude reviews each PR push, alongside Codex                (module 2)
-    pr-checks.yml            the same checks the agent runs, skipped on docs-only PRs    (module 4)
-    build-image.yml          source-hash-gated container builds                          (module 4)
+    claude-fix-issue.yml     issue -> branch -> draft PR, with routing, caps, guardrails
+    claude.yml               @claude follow-ups on PRs: the human review gate
+    claude-review-sweep.yml  daily triage of open review comments (manual, one PR, on public repos)
+    claude-code-review.yml   Claude reviews each PR push, alongside Codex
+    pr-checks.yml            the same checks the agent runs, skipped on docs-only PRs
+    build-image.yml          source-hash-gated container builds
   .github/ISSUE_TEMPLATE/agent-fix.yml   a bug report an unattended agent can act on
   .github/actions/project-setup/   toolchain + install from agent-ci.json, shared by every workflow
   .claude/
@@ -32,7 +33,7 @@ The kit (copy these into your repo)
     hooks/session-start.sh   installs dependencies in fresh containers
     settings.json
   AGENTS.md / CLAUDE.md      the agent's rulebook
-  vps/                       always-on self-hosted runner                                 (module 5)
+  vps/                       always-on self-hosted runner
   docs/COST-CONTROLS.md      every cost control, where it lives, what it bounds
   docs/GUARDRAILS.md         what stops an unattended agent from doing damage
   docs/PROJECT-CONFIG.md     every field of agent-ci.json, with Node and Python examples
@@ -43,7 +44,10 @@ The sample app (replace with yours)
 
 ## Quickstart
 
-1. Fork or "Use this template". Keep it **private** while you try it.
+1. Fork or "Use this template". Keep it **private** while you try it: the
+   defaults assume every commenter is you or a bot you installed. Running it
+   on a public repo? Read "Before enabling on a public repo" in
+   `docs/GUARDRAILS.md` first.
 2. Install the Claude GitHub App: https://github.com/apps/claude
 3. Add repo secrets:
    - `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token`; uses your Pro/Max plan) **or** `ANTHROPIC_API_KEY` (API billing)
@@ -64,7 +68,9 @@ The sample app (replace with yours)
    you cannot approve your own PR. To keep required approvals, put a second
    (bot) account's PAT in `AGENT_PR_TOKEN`, or use your own GitHub App and mint
    its token in the workflow with `actions/create-github-app-token`. App tokens
-   expire after an hour, so one pasted into the secret stops working.
+   expire after an hour, so one pasted into the secret stops working. On a
+   public repo, see `docs/GUARDRAILS.md` for the merge gate and who holds its
+   bypass.
 6. Open a bug with the "Bug for the agent" template and label it `agent:fix`.
 
 Locally: `make check` runs exactly what CI and the agents run. `make run`
@@ -109,3 +115,7 @@ Repo variables (Settings → Variables), all optional:
 | `AGENT_INTERACTIVE_MODEL` / `AGENT_SWEEP_MODEL` | sonnet | |
 
 See `docs/COST-CONTROLS.md`.
+
+## License
+
+[MIT](LICENSE). Security issues: see [SECURITY.md](SECURITY.md).

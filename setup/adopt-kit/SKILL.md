@@ -128,8 +128,8 @@ Usually that is:
   hold more agent workflows than this list; read each one's header comment
   and offer it in a line. Recommend the first three. Add
   PR checks unless their CI already runs the same gate on every PR; running
-  it twice only costs minutes. The VPS runner (`vps/`) is a separate guide
-  module; leave it out.
+  it twice only costs minutes. The VPS runner (`vps/`) is optional and
+  set up separately; leave it out.
 - **Budget**: the defaults (10 fix runs a day, Sonnet unless labeled
   `agent:fix-opus`) suit most solo projects. Ask whether they want different
   caps; only non-default answers become repo variables.
@@ -161,7 +161,9 @@ Copy from `$KIT`, keeping paths:
   `docs/agent-ci/` and fix the links that point at these files.
 
 Never copy the sample app (`cmd/`, `internal/`, `go.mod`, the kit's
-`Dockerfile` and `Makefile`), `README.md`, `INVENTORY.md`, `setup/` or `vps/`.
+`Dockerfile` and `Makefile`), `README.md`, `LICENSE`, `SECURITY.md`,
+`INVENTORY.md`, `setup/` or `vps/`. The license and security policy are this
+kit's own; the user picks theirs.
 
 Merge rules for files that already exist:
 
@@ -193,10 +195,14 @@ Fill in:
 - **`.claude/project-profile.md`**: keep every section heading of the kit's
   copy, in order, and rewrite each body for their project. A section with
   nothing to say gets "None." rather than being deleted; the skills read
-  these by heading. In **Repo**, keep the sentence permitting
-  `review-sweep`'s reaction-count approval shortcut only for a private repo
-  with a single maintainer. Otherwise delete it: the sweep would count an
-  outsider's reaction as approval. Doctor fails on it.
+  these by heading. In **Repo**, state whether the repo is public or private
+  and keep the rules tying approvals, declines and clean verdicts to the
+  maintainer and agent logins. The kit's copy is written for a public repo,
+  so the reaction-count approval shortcut is off. For a private repo with a
+  single maintainer, they may turn it on by adding "`review-sweep`'s
+  reaction-count approval shortcut is permitted on that basis." Never on a
+  public repo or with collaborators they do not control: the sweep would
+  count an outsider's reaction as approval. Doctor fails on it.
 - **`AGENTS.md`**: replace the project sections (Project status, What this
   project is, Layout, the sample's API table, Commands) with theirs. Keep the
   agent sections (Agents in CI, QA and code review, Session behavior, Shared
@@ -245,8 +251,10 @@ that changed since this skill was written):
   bypass. Actor 5 is the Repository admin role. Agent PRs are opened with
   their PAT, so GitHub lists them as the author and they cannot approve
   their own PRs; they merge with the admin bypass. That bypass belongs to
-  whoever holds the PAT, so the kit only uses `AGENT_PR_TOKEN` in a step
-  after the agent has exited; never pass it to an agent step. Never add an
+  whoever holds the PAT, so the fix workflow only uses `AGENT_PR_TOKEN` in a
+  step after the agent has exited, and `claude.yml` does not use it at all. The review sweep is
+  the one exception: its agent pushes fixes with it so CI runs, which
+  `$KIT/docs/GUARDRAILS.md` covers. Never pass it to any other agent step. Never add an
   app or the agent's identity to the bypass list. Approval of the latest
   push means a push the agent makes after their approval needs approving
   again. If a ruleset already covers the default branch, show them the

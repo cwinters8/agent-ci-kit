@@ -1,4 +1,4 @@
-# SOURCE-HASH-GATED BUILDS (module 4).
+# SOURCE-HASH-GATED BUILDS.
 #
 # Agents open a lot of PRs, and a lot of them only touch docs, tests or CI. A
 # container image built from an unchanged binary is money spent to produce a

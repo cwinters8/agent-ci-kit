@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Always-on agent box (module 5, bonus).
+# Always-on agent box (optional).
 #
 # Turns a fresh Ubuntu 24.04 VPS (2 vCPU / 4 GB is plenty; the model runs on
 # Anthropic's side, not here) into a self-hosted GitHub Actions runner with
