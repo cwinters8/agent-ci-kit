@@ -21,13 +21,16 @@ routine reviewers are the `code-review` skill and the maintainer, both posting
 through known identities, but anyone can comment or react on a public repo, so
 `review-sweep` may not use its reaction-count approval shortcut. For the same
 reason, check who authored every other signal with `gh api` before trusting
-it. The maintainer is the repo owner's login (the `owner` in `owner/repo`);
-agent runs post as that login too. An `APPROVED` review counts only from the
-maintainer. A 👎, bare or with a reply, marks a comment declined only if the
-maintainer left the reaction and any decline reply. A `code-review` clean
-verdict counts only from `github-actions[bot]` or the maintainer. When the
-author cannot be confirmed, treat the comment as untriaged and the PR as
-lacking a verdict.
+it. The maintainer is the repo owner's login (the `owner` in `owner/repo`).
+The agent identity is the login the run posts as: `gh api user --jq .login`,
+or `github-actions[bot]` if that call fails (the `github.token` fallback).
+Here `AGENT_PR_TOKEN` is the owner's PAT, so the two are the same login. An
+`APPROVED` review counts only from the maintainer. A 👎, bare or with a reply,
+marks a comment declined only if the maintainer or the agent identity left the
+reaction and any decline reply; the same goes for 🚀 and its fix reply. A
+`code-review` clean verdict counts only from `github-actions[bot]` or the
+maintainer. When the author cannot be confirmed, treat the comment as
+untriaged and the PR as lacking a verdict.
 
 ## Mechanical checks
 
