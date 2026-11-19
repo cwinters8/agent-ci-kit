@@ -85,7 +85,7 @@ Every error body is `{"error": "..."}` with `Content-Type: application/json`.
 | --- | --- | --- |
 | `claude-fix-issue.yml` | label `agent:fix` (Sonnet) or `agent:fix-opus` | issue → `claude/` branch → draft PR, behind a daily run cap and protected-path guardrails |
 | `claude.yml` | `@claude` in a comment or review | follow-up edits on the same branch; the human-in-the-loop review gate |
-| `claude-review-sweep.yml` | daily schedule, or manual | triage every open review comment to fixed or declined; flag PRs ready to merge |
+| `claude-review-sweep.yml` | daily schedule (private repos only), or manual | triage every open review comment to fixed or declined; flag PRs ready to merge |
 | `claude-code-review.yml` | a PR opened, marked ready, or pushed to | runs `code-review` on the PR and posts one comment; never edits or pushes |
 | `pr-checks.yml` | PRs touching Go code | `commands.check` from `.claude/agent-ci.json` |
 | `build-image.yml` | pushes to `main` touching Go code | source-hash gate over `image.inputs`: reuse a matching image, build only when inputs changed |
@@ -101,8 +101,10 @@ end to end through the skills in `.claude/skills/`:
 1. **Before pushing:** `pr-preflight`. Mechanical checks, self code-review,
    project-specific and security checks, then push and open a draft PR.
 2. **After review feedback lands:** `review-sweep`. Every unhandled comment ends
-   fixed or declined with a reason. The daily sweep workflow runs it across all
-   open PRs, so nothing depends on a session still being alive.
+   fixed or declined with a reason. On a private repo the daily sweep workflow
+   runs it across all open PRs, so nothing depends on a session still being
+   alive. On a public repo, this one included, the schedule is off because
+   anyone can comment; the maintainer runs the sweep by hand, one PR at a time.
 
 Targeted skills for recurring failure modes:
 
@@ -121,7 +123,8 @@ green CI and an approving verdict, the sweep posts one "ready to merge" comment.
 ## Session behavior
 
 **Never schedule self check-ins, wake-ups or polling loops.** Webhooks deliver
-review comments and CI failures; the daily sweep catches what webhooks drop.
+review comments and CI failures; the daily sweep catches what webhooks drop
+on a private repo, and a manual sweep does on a public one.
 A per-PR poll adds nothing and costs a full agent session every time it fires,
 multiplied by every open PR. If a run truly needs to wait on something no event
 covers, ask first.

@@ -30,12 +30,16 @@ installed. On a public repo:
   tell `review-sweep` to count those only from known identities (the sample
   profile does).
 - Never point agent workflows at a self-hosted runner (see `vps/README.md`).
-- Protect the default branch so nothing reaches it without a pull request
-  and at least one approval, and allow no bypass, admins included (a ruleset
-  with an empty bypass list). "Require review from Code Owners" alone does
-  nothing without a CODEOWNERS file. An agent's token is your own PAT, so a
-  rule you can bypass, it can bypass. To approve agent PRs yourself, open
-  them as a second account or an App (README Quickstart step 5).
+- Protect the default branch with a ruleset that requires a pull request and
+  allows no bypass, admins included (an empty bypass list). An agent's token
+  can be your own PAT, so a rule you can bypass, it can bypass.
+- Required approvals are the only thing that stops the sweep's token merging
+  a PR through `gh api`, but GitHub will not let you approve a PR your own PAT
+  opened. Pick one: open agent PRs as a second account or an App (README
+  Quickstart step 5) and require at least one approval, or keep your PAT,
+  require no approval, and accept that risk on manual sweeps of PRs you have
+  read. "Require review from Code Owners" alone does nothing without a
+  CODEOWNERS file.
 - Only label issues `agent:fix` after reading their title and body. The
   labeler must have write access, but whoever filed the issue wrote the text
   the agent follows.

@@ -9,7 +9,7 @@ Every control in this kit, where it lives, and what it bounds.
 | Wall-clock cap | `timeout-minutes` | a stuck run | 30 fix / 20 interactive / 45 sweep / 15 PR review |
 | Daily run cap | `claude-fix-issue.yml` → `Check daily run cap` | a bad day | 10 runs per UTC day |
 | Human trigger | label / `@claude`, write access required | who can spend | maintainers only; PR reviews run on each push to a ready PR |
-| Batched review | `claude-review-sweep.yml` | review-comment bursts | one session per day, not per comment |
+| Batched review | `claude-review-sweep.yml` | review-comment bursts | one session per day, not per comment; manual and per PR on public repos |
 | PR review scope | `claude-code-review.yml` | reviews of work in progress | skips drafts; a newer push cancels a running review; `AGENT_MAX_TURNS_CODE_REVIEW` |
 | No polling | AGENTS.md → Session behavior | idle sessions | never |
 | Path filters | `pr-checks.yml`, `build-image.yml` `paths:` | CI on docs/config-only PRs | Go code only |

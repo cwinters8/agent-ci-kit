@@ -5,8 +5,9 @@ controls that keep that from becoming a surprise bill.
 
 Label an issue `agent:fix`. An agent picks it up on a GitHub runner, finds the
 bug, makes the smallest fix, runs your checks and opens a draft PR. You review
-it, comment `@claude` for changes, and merge. A daily sweep keeps every PR's
-review comments moving while you are away.
+it, comment `@claude` for changes, and merge. On a private repo, a daily sweep
+keeps every PR's review comments moving while you are away; on a public one
+you run it by hand.
 
 This repo is a working sample: a small Go todo API with the whole kit wired
 around it. Fork it to watch the agents work, then copy the kit files into your
@@ -67,7 +68,8 @@ The sample app (replace with yours)
    you cannot approve your own PR. To keep required approvals, put a second
    (bot) account's PAT in `AGENT_PR_TOKEN`, or use your own GitHub App and mint
    its token in the workflow with `actions/create-github-app-token`. App tokens
-   expire after an hour, so one pasted into the secret stops working.
+   expire after an hour, so one pasted into the secret stops working. On a
+   public repo, also allow no bypass: see `docs/GUARDRAILS.md`.
 6. Open a bug with the "Bug for the agent" template and label it `agent:fix`.
 
 Locally: `make check` runs exactly what CI and the agents run. `make run`

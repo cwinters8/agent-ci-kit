@@ -45,6 +45,7 @@ jobs:
     timeout-minutes: 2
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       run: ${{ steps.check.outputs.run }}
     steps:
@@ -103,11 +104,11 @@ jobs:
         with:
           config-ref: origin/${{ github.event.repository.default_branch }}
 
-      # Named subcommands, not `gh pr:*` or `git:*`: the sweep never merges, and
-      # a bare `git` prefix hands it `git -c alias.x='!cmd'`. This is defense in
-      # depth, not a boundary: with Edit and the project's checks allowed, the
-      # agent can still run code it writes, and `gh api` (needed for reactions
-      # and review threads) still reaches the merge endpoint. Branch protection
+      # Named subcommands, not `gh pr:*` or `git:*`: the sweep never merges.
+      # This is defense in depth, not a boundary: with Edit and the project's
+      # checks allowed, the agent can still run code it writes, and `gh api`
+      # (needed for reactions and review threads) still reaches the merge
+      # endpoint. Branch protection
       # is the real merge gate (docs/GUARDRAILS.md). `gh pr create` is for the
       # skill's `<pr-branch>-review-fixes` side PRs.
       - name: Run review sweep
