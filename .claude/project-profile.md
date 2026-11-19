@@ -121,7 +121,9 @@ None. The API has no users and no sessions.
 - `.env*` is gitignored except `.env.example`.
 - `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` exist only as repo secrets,
   passed to the agent step alone. Never in a job-level `env:`, never echoed.
-- `AGENT_PR_TOKEN` can push branches and open PRs. Same rule.
+- `AGENT_PR_TOKEN` can push branches and open PRs. Only in steps that run
+  after an agent has exited, except the review sweep's agent step, which
+  pushes fixes with it (`docs/GUARDRAILS.md`).
 - Image pushes use the built-in `GITHUB_TOKEN` with `packages: write` on that
   job only.
 
