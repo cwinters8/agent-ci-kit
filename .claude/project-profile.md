@@ -16,11 +16,10 @@ holds no rules of its own.
 
 ## Repo
 
-Derive `owner/repo` from the git remote. Private, single maintainer. The
+Derive `owner/repo` from the git remote. Public, single maintainer. The
 routine reviewers are the `code-review` skill and the maintainer, both posting
-through known identities. `review-sweep`'s reaction-count approval shortcut is
-permitted on that basis; remove this line if the repo goes public or gains
-collaborators you do not control.
+through known identities, but anyone can comment or react on a public repo, so
+`review-sweep` may not use its reaction-count approval shortcut.
 
 ## Mechanical checks
 
@@ -95,7 +94,7 @@ that reaches the shipped image or the CI that builds it.
 
 `.claude/**` is in scope because the agent's own settings, hooks and skills
 decide what it is allowed to run in CI with your secrets present.
-`setup/**` is in scope because buyers run it on their own machines, with
+`setup/**` is in scope because adopters run it on their own machines, with
 their `gh` credentials, against their own repos.
 
 ## Stack

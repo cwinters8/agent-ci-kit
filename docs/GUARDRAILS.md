@@ -20,8 +20,9 @@ The defaults assume a private repo where every commenter is you or a bot you
 installed. On a public repo:
 
 - Keep `allowed_non_write_users` unset (the default). Never set it to `*`.
-- Disable the `claude-review-sweep.yml` schedule, or restrict it to PRs by
-  maintainers: it reads review text from anyone and can push.
+- `claude-review-sweep.yml` skips its schedule on public repos on its own:
+  it reads review text from anyone and can push. Run it by hand, with the
+  `pr` input set to a PR whose comments you have read.
 - Never point agent workflows at a self-hosted runner (see `vps/README.md`).
 - Turn on branch protection requiring review on the default branch.
 - Only `@claude` on PRs whose authors you trust. The run installs the PR's

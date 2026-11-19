@@ -1,7 +1,6 @@
 # Cost controls
 
-Every control in this kit, where it lives, and what it bounds. Module 3 of the
-guide explains the reasoning; this page is the reference.
+Every control in this kit, where it lives, and what it bounds.
 
 | Control | Where | Bounds | Default |
 | --- | --- | --- | --- |

@@ -128,8 +128,8 @@ Usually that is:
   hold more agent workflows than this list; read each one's header comment
   and offer it in a line. Recommend the first three. Add
   PR checks unless their CI already runs the same gate on every PR; running
-  it twice only costs minutes. The VPS runner (`vps/`) is a separate guide
-  module; leave it out.
+  it twice only costs minutes. The VPS runner (`vps/`) is optional and
+  set up separately; leave it out.
 - **Budget**: the defaults (10 fix runs a day, Sonnet unless labeled
   `agent:fix-opus`) suit most solo projects. Ask whether they want different
   caps; only non-default answers become repo variables.
@@ -161,7 +161,9 @@ Copy from `$KIT`, keeping paths:
   `docs/agent-ci/` and fix the links that point at these files.
 
 Never copy the sample app (`cmd/`, `internal/`, `go.mod`, the kit's
-`Dockerfile` and `Makefile`), `README.md`, `INVENTORY.md`, `setup/` or `vps/`.
+`Dockerfile` and `Makefile`), `README.md`, `LICENSE`, `SECURITY.md`,
+`INVENTORY.md`, `setup/` or `vps/`. The license and security policy are this
+kit's own; the user picks theirs.
 
 Merge rules for files that already exist:
 

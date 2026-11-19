@@ -11,8 +11,9 @@
 # review bots comment in bursts.
 #
 # Trust: the sweep reads review comment text and can push. Fine for a private
-# repo where every commenter is you or a bot you installed. On a public repo,
-# restrict it (see docs/GUARDRAILS.md) before enabling the schedule.
+# repo where every commenter is you or a bot you installed. On a public repo
+# anyone can comment, so the `gate` job skips the schedule there; run it by
+# hand on a PR you have read (see docs/GUARDRAILS.md).
 
 name: Claude review sweep
 
@@ -34,7 +35,34 @@ permissions:
   contents: read
 
 jobs:
+  # The schedule event carries no repository visibility, so ask the API. Fails
+  # closed: if the lookup errors, this job fails and the sweep does not run.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - name: Skip the schedule on public repos
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          visibility="$(gh api "repos/$REPO" --jq .visibility)"
+          if [ "$EVENT" = schedule ] && [ "$visibility" = public ]; then
+            echo "::notice::Public repo: the scheduled sweep is off because it would act on review comments from anyone. Run it by hand on a PR you have read."
+            echo run=false >> "$GITHUB_OUTPUT"
+          else
+            echo run=true >> "$GITHUB_OUTPUT"
+          fi
+
   sweep:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:

@@ -49,7 +49,7 @@ the server empties it. Routes use Go 1.22+ `net/http` method patterns.
   and protected paths the workflows read. Schema alongside;
   reference in `docs/PROJECT-CONFIG.md`.
 - `.claude/project-profile.md`: the project facts the vendored skills read.
-- `setup/`: the `adopt-kit` skill buyers install to set the kit up in their
+- `setup/`: the `adopt-kit` skill adopters install to set the kit up in their
   own repo, and its `doctor.sh` checker. Authored here, not vendored.
 - `.claude/skills/`: vendored skills. Never hand-edit; see
   [Shared skills](#shared-skills).
