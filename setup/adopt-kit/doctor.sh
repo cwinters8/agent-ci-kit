@@ -402,8 +402,9 @@ else
   # A profile that permits review-sweep's reaction-count approval shortcut is
   # only safe on a private repo with a single maintainer.
   if [ -f .claude/project-profile.md ] && grep -q 'approval shortcut is' .claude/project-profile.md; then
-    if [ "$(jq -r .visibility <<< "$info")" != private ]; then
-      fail "project profile permits review-sweep's reaction-count approval shortcut on a public repo; remove that line"
+    visibility="$(jq -r .visibility <<< "$info")"
+    if [ "$visibility" != private ]; then
+      fail "project profile permits review-sweep's reaction-count approval shortcut, but the repo is $visibility; remove that line"
     elif people="$(gh api "repos/$repo/collaborators" --paginate --jq '.[].login' 2> /dev/null)"; then
       if [ "$(grep -c . <<< "$people")" -gt 1 ]; then
         fail "project profile permits review-sweep's reaction-count approval shortcut, but the repo has more than one collaborator; remove that line"

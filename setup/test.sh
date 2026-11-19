@@ -372,6 +372,17 @@ echo '{"bypass_actors": [{"actor_type": "Integration", "actor_id": 1234, "bypass
 out="$(github_doctor "$repo_dir" "$gh_dir")"
 expect "doctor: a ruleset an app can bypass fails" "$out" "+✗ the main ruleset lets a GitHub App bypass it"
 
+for vis in public internal; do
+  dir="$(node_repo "shortcut-$vis")"
+  printf "# Project profile\n\n## Repo\n\nSingle maintainer. \`review-sweep\`'s reaction-count approval shortcut is permitted on that basis.\n" \
+    > "$dir/.claude/project-profile.md"
+  gh_dir="$(github_ok "shortcut-$vis")"
+  echo "{\"default_branch\": \"main\", \"visibility\": \"$vis\"}" > "$gh_dir/repos_acme_app.json"
+  out="$(github_doctor "$dir" "$gh_dir")"
+  expect "doctor: the reaction-count shortcut fails when the repo is $vis" "$out" \
+    "+✗ project profile permits review-sweep's reaction-count approval shortcut, but the repo is $vis"
+done
+
 dir="$(node_repo kit-owner)"
 echo '* @cwinters8' > "$dir/.github/CODEOWNERS"
 out="$(github_doctor "$dir" "$(github_ok kit-owner)")"
