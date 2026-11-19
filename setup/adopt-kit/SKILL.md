@@ -251,8 +251,10 @@ that changed since this skill was written):
   bypass. Actor 5 is the Repository admin role. Agent PRs are opened with
   their PAT, so GitHub lists them as the author and they cannot approve
   their own PRs; they merge with the admin bypass. That bypass belongs to
-  whoever holds the PAT, so the kit only uses `AGENT_PR_TOKEN` in a step
-  after the agent has exited; never pass it to an agent step. Never add an
+  whoever holds the PAT, so the fix and `@claude` workflows only use
+  `AGENT_PR_TOKEN` in a step after the agent has exited. The review sweep is
+  the one exception: its agent pushes fixes with it so CI runs, which
+  `$KIT/docs/GUARDRAILS.md` covers. Never pass it to any other agent step. Never add an
   app or the agent's identity to the bypass list. Approval of the latest
   push means a push the agent makes after their approval needs approving
   again. If a ruleset already covers the default branch, show them the

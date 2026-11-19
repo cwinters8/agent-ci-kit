@@ -69,7 +69,8 @@ The sample app (replace with yours)
    (bot) account's PAT in `AGENT_PR_TOKEN`, or use your own GitHub App and mint
    its token in the workflow with `actions/create-github-app-token`. App tokens
    expire after an hour, so one pasted into the secret stops working. On a
-   public repo, also allow no bypass: see `docs/GUARDRAILS.md`.
+   public repo, see `docs/GUARDRAILS.md` for the merge gate and who holds its
+   bypass.
 6. Open a bug with the "Bug for the agent" template and label it `agent:fix`.
 
 Locally: `make check` runs exactly what CI and the agents run. `make run`
