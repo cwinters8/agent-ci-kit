@@ -103,6 +103,11 @@ jobs:
         with:
           config-ref: origin/${{ github.event.repository.default_branch }}
 
+      # Named subcommands, not `gh pr:*` or `git:*`: the sweep never merges, and
+      # a bare `git` prefix would also allow `git -c alias.x='!cmd'`, which runs
+      # any command. `gh api` stays open for reactions and review threads, so
+      # it can still reach the merge endpoint; branch protection is the real
+      # merge gate (docs/GUARDRAILS.md).
       - name: Run review sweep
         uses: anthropics/claude-code-action@v1
         with:
@@ -121,7 +126,7 @@ jobs:
           claude_args: >-
             --model ${{ vars.AGENT_SWEEP_MODEL || 'sonnet' }}
             --max-turns ${{ vars.AGENT_MAX_TURNS_SWEEP || '60' }}
-            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Skill,Bash(gh pr:*),Bash(gh api:*),Bash(gh run:*),${{ steps.project.outputs.allowed-bash }},Bash(git:*)"
-            --disallowedTools "WebFetch,WebSearch"
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Skill,Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*),Bash(gh pr checks:*),Bash(gh pr checkout:*),Bash(gh pr comment:*),Bash(gh pr ready:*),Bash(gh api:*),Bash(gh run:*),${{ steps.project.outputs.allowed-bash }},Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(git ls-files:*),Bash(git rev-parse:*),Bash(git merge-base:*),Bash(git remote:*),Bash(git branch:*),Bash(git fetch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git pull:*),Bash(git merge:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*)"
+            --disallowedTools "WebFetch,WebSearch,Bash(gh pr merge:*)"
         env:
           GH_TOKEN: ${{ secrets.AGENT_PR_TOKEN || github.token }}

@@ -10,7 +10,7 @@ by asking the model nicely.
 | Large diffs are flagged | diffs over `AGENT_MAX_DIFF_LINES` get `agent:large-diff` |
 | Agent cannot browse the web | `--disallowedTools WebFetch,WebSearch` (blocks prompt injection from fetched pages and data exfiltration by URL) |
 | Agent can only run listed commands | `--allowedTools` allowlist built from the named `commands` and `allow`, read from the default branch so a PR cannot widen it; anything else is denied in a headless run |
-| Agent never merges or pushes to main | no merge tool granted; branch protection on main (set this up) |
+| Agent never merges or pushes to main | no workflow grants `gh pr merge`, and `git` is allowed by named subcommand only. The sweep keeps `gh api` and `git push` for its job and its token can write, so branch protection on main is the real gate: set it up |
 | PRs open as drafts | `gh pr create --draft` in the workflow |
 | Credentials are step-scoped | secrets passed to the action step only, never a job-level `env:` |
 
@@ -30,8 +30,11 @@ installed. On a public repo:
   tell `review-sweep` to count those only from known identities (the sample
   profile does).
 - Never point agent workflows at a self-hosted runner (see `vps/README.md`).
-- Protect the default branch as README Quickstart step 5 describes, so
-  nothing reaches it without a pull request.
+- Protect the default branch so nothing reaches it without a pull request
+  and a code owner's approval, and allow no bypass, admins included (a
+  ruleset with an empty bypass list). An agent's token is your own PAT, so a
+  rule you can bypass, it can bypass. To approve agent PRs yourself, open
+  them as a second account or an App (README Quickstart step 5).
 - Only label issues `agent:fix` after reading their title and body. The
   labeler must have write access, but whoever filed the issue wrote the text
   the agent follows.
