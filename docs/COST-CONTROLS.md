@@ -7,7 +7,7 @@ Every control in this kit, where it lives, and what it bounds.
 | Model routing | `claude-fix-issue.yml` → `Route model` | price per token | Sonnet; Opus only via `agent:fix-opus` |
 | Turn cap | `--max-turns` in each workflow | one run's length | 30 Sonnet / 40 Opus / 20 interactive / 60 sweep / 20 PR review |
 | Wall-clock cap | `timeout-minutes` | a stuck run | 30 fix / 20 interactive / 45 sweep / 15 PR review |
-| Daily run cap | `claude-fix-issue.yml` → `Check daily run cap` | a bad day | 10 runs per UTC day |
+| Daily run cap | `claude-fix-issue.yml` → `Check daily run cap` | a bad day of fix runs | 10 fix runs per UTC day. Fix runs only: `@claude`, PR review and manual sweep runs have no daily cap, only their turn and wall-clock caps and who can trigger them |
 | Human trigger | label / `@claude`, write access required | who can spend | maintainers only; PR reviews run on each push to a ready PR |
 | Batched review | `claude-review-sweep.yml` | review-comment bursts | one session per day, not per comment; manual and per PR on public repos |
 | PR review scope | `claude-code-review.yml` | reviews of work in progress | skips drafts; a newer push cancels a running review; `AGENT_MAX_TURNS_CODE_REVIEW` |

@@ -1,18 +1,21 @@
 # Guardrails
 
-What stops an unattended agent from doing damage, enforced by YAML rather than
-by asking the model nicely.
+What stops an unattended agent from doing damage, and exactly how far each
+control reaches. Most rows are YAML you can read rather than instructions the
+model may ignore. The one control that actually keeps agent work off your
+default branch is branch protection, which lives in your repo settings, not in
+this kit: `/adopt-kit` installs it and `/adopt-kit doctor` checks it.
 
-| Guardrail | Enforced by |
+| Guardrail | What enforces it, and where it stops |
 | --- | --- |
-| Only maintainers can start a run | label/comment triggers need write access; the action re-checks that the actor is a human with write access |
-| Agent never touches CI, agent config or secrets | `Guardrails` step refuses to open a PR if the diff touches `.github/`, `.claude/`, `.env*` or a `protected_paths` entry in `.claude/agent-ci.json`, and labels the issue `agent:needs-human`. The config can add paths, never remove the fixed three |
-| Large diffs are flagged | diffs over `AGENT_MAX_DIFF_LINES` get `agent:large-diff` |
-| Agent cannot browse the web | `--disallowedTools WebFetch,WebSearch` (blocks prompt injection from fetched pages and data exfiltration by URL) |
-| Agent can only run listed commands | `--allowedTools` allowlist built from the named `commands` and `allow`, read from the default branch so a PR cannot widen it; anything else is denied in a headless run |
-| Agent never merges or pushes to main | branch protection on main: set it up. No workflow grants `gh pr merge` and `git` is allowed by named subcommand only, but that is defense in depth: the sweep keeps `gh api` and `git push` for its job, and its token can write |
-| PRs open as drafts | `gh pr create --draft` in the workflow |
-| Credentials are step-scoped | secrets passed to the action step only, never a job-level `env:` |
+| Only maintainers can start a run | Label and `@claude` triggers need write access, and the action re-checks that the actor is a human with write access. `claude-code-review.yml` runs on every push to a ready same-repo PR, which also needs write access; fork PRs are skipped |
+| Changes to CI, agent config or secrets don't reach a PR unseen | `claude-fix-issue.yml` only: after the agent pushes, the `Guardrails` step diffs the run's branch and refuses to open a PR if it touches `.github/`, `.claude/`, `.env*` or a `protected_paths` entry in `.claude/agent-ci.json` (the config can add paths, never remove the fixed three). It labels the issue `agent:needs-human` and leaves the branch for you to inspect. It checks only that branch, after the push, so it flags a change rather than preventing it. `claude.yml` and the review sweep have no path check; their pushes land on a PR you review. What stops any of it reaching the default branch is branch protection with code owner review |
+| Large diffs are flagged | `claude-fix-issue.yml` labels diffs over `AGENT_MAX_DIFF_LINES` with `agent:large-diff` |
+| No web tools | `--disallowedTools WebFetch,WebSearch` takes away the agent's own browsing, which cuts the easy route for prompt injection from fetched pages. It is not network isolation: the runner's network is open, and an allowlisted check (`make check`, `go test`) runs code the agent can write, which can reach the internet |
+| Agent can only run listed commands | `--allowedTools` is built from the named `commands` and `allow` in `.claude/agent-ci.json`, read from the default branch so a PR cannot widen it; anything else is denied in a headless run. A listed check still runs whatever code the branch holds, including code the agent wrote, so the list bounds the commands typed, not the code that runs |
+| Agent never merges or pushes to main | Branch protection on the default branch: a ruleset requiring a pull request and a code owner's approval. `/adopt-kit doctor` fails without it. No workflow grants `gh pr merge` and `git` is allowed by named subcommand only, but that is defense in depth: `git push` can name the default branch, the sweep keeps `gh api` (which reaches the merge endpoint), and its `AGENT_PR_TOKEN` can write |
+| PRs open as drafts | The fix workflow opens its PR with `gh pr create --draft`; the agent never opens it |
+| Credentials are step-scoped | Secrets are passed to the step that needs them, never a job-level `env:`. The sweep's agent step does get `AGENT_PR_TOKEN`, so its fix pushes trigger CI |
 
 ## Before enabling on a public repo
 
